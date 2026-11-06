@@ -2,8 +2,10 @@ package scaffolder
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"unicode"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -14,6 +16,17 @@ import (
 )
 
 type noArgs struct{}
+
+func unmarshalNoArgs(_ context.Context, arguments string) (any, error) {
+	var input noArgs
+	if strings.TrimSpace(arguments) == "" {
+		return input, nil
+	}
+	if err := json.Unmarshal([]byte(arguments), &input); err != nil {
+		return nil, err
+	}
+	return input, nil
+}
 
 type paragraphView struct {
 	ID   int    `json:"id"`
@@ -97,7 +110,7 @@ func (s *Service) tools(art store.Article, collectionOutline string) ([]tool.Bas
 	if err := add(utils.InferTool(prompt.ToolReadArticle, prompt.ToolDescription(prompt.ToolReadArticle),
 		func(ctx context.Context, _ noArgs) (articleView, error) {
 			return s.articleView(ctx, art.ID)
-		})); err != nil {
+		}, utils.WithUnmarshalArguments(unmarshalNoArgs))); err != nil {
 		return nil, err
 	}
 
@@ -129,7 +142,7 @@ func (s *Service) tools(art store.Article, collectionOutline string) ([]tool.Bas
 				res.Articles = append(res.Articles, siblingView{ID: sb.ID, Title: sb.Title, Synopsis: full.Synopsis, Opening: opening})
 			}
 			return res, nil
-		})); err != nil {
+		}, utils.WithUnmarshalArguments(unmarshalNoArgs))); err != nil {
 		return nil, err
 	}
 
@@ -161,7 +174,7 @@ func (s *Service) tools(art store.Article, collectionOutline string) ([]tool.Bas
 	if err := add(utils.InferTool(prompt.ToolReadOutline, prompt.ToolDescription(prompt.ToolReadOutline),
 		func(ctx context.Context, _ noArgs) (outlineResult, error) {
 			return outlineResult{Outline: collectionOutline}, nil
-		})); err != nil {
+		}, utils.WithUnmarshalArguments(unmarshalNoArgs))); err != nil {
 		return nil, err
 	}
 
