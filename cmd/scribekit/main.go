@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -32,16 +31,6 @@ import (
 )
 
 func main() {
-	logConfig := zap.NewProductionConfig()
-	logConfig.Sampling = nil
-	logger, err := logConfig.Build()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	zap.ReplaceGlobals(logger)
-	callbacks.AppendGlobalHandlers(logging.EinoHandler())
-	defer logger.Sync()
 	cfg, err := config.Parse(os.Args[1:], os.Stderr)
 	if errors.Is(err, flag.ErrHelp) {
 		return
@@ -49,8 +38,18 @@ func main() {
 	if err != nil {
 		os.Exit(2)
 	}
+	logConfig := logging.NewConfig(cfg.JSONLog)
+	logger, err := logConfig.Build()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	zap.ReplaceGlobals(logger)
+	defer zap.RedirectStdLog(logger)()
+	callbacks.AppendGlobalHandlers(logging.EinoHandler())
+	defer logger.Sync()
 	if err := run(cfg); err != nil {
-		slog.Error("scribekit 退出", "err", err)
+		logger.Error("scribekit 退出", zap.Error(err))
 		_ = logger.Sync()
 		os.Exit(1)
 	}
@@ -83,11 +82,11 @@ func run(cfg config.Config) error {
 	}
 	warnIfExposed(ln.Addr())
 	url := "http://" + browserHost(ln.Addr()) + "/"
-	slog.Info("ScribeKit 已启动", "url", url, "data", cfg.DataDir)
+	zap.L().Info("ScribeKit 已启动", zap.String("url", url), zap.String("data", cfg.DataDir))
 	if !cfg.NoBrowser {
 		go func() {
 			if err := openBrowser(url); err != nil {
-				slog.Warn("无法自动打开浏览器，请手动访问上面的地址", "err", err)
+				zap.L().Warn("无法自动打开浏览器，请手动访问上面的地址", zap.Error(err))
 			}
 		}()
 	}
@@ -98,7 +97,7 @@ func run(cfg config.Config) error {
 		ShutdownTimeout:       5 * time.Second,
 	})
 	if ctx.Err() != nil {
-		slog.Info("已退出")
+		zap.L().Info("已退出")
 		return nil
 	}
 	return err
@@ -106,7 +105,7 @@ func run(cfg config.Config) error {
 
 func warnIfExposed(addr net.Addr) {
 	if tcp, ok := addr.(*net.TCPAddr); ok && !tcp.IP.IsLoopback() {
-		slog.Warn("监听地址不是回环地址：ScribeKit 没有鉴权，局域网内任何人都能读写你的文章并使用你的 API Key", "addr", addr.String())
+		zap.L().Warn("监听地址不是回环地址：ScribeKit 没有鉴权，局域网内任何人都能读写你的文章并使用你的 API Key", zap.String("addr", addr.String()))
 	}
 }
 

@@ -5,12 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"go.uber.org/zap"
 
 	"github.com/chhongzh/scribekit/internal/apperr"
 	"github.com/chhongzh/scribekit/internal/guide"
@@ -60,7 +60,7 @@ func ErrorHandler(c fiber.Ctx, err error) error {
 		}
 		return c.Status(fe.Code).JSON(errorBody{&apperr.Error{Code: code, Message: fe.Message}})
 	}
-	slog.Error("request failed", "method", c.Method(), "path", c.Path(), "err", err)
+	zap.L().Error("request failed", zap.String("method", c.Method()), zap.String("path", c.Path()), zap.Error(err))
 	return c.Status(http.StatusInternalServerError).JSON(errorBody{apperr.From(err)})
 }
 

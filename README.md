@@ -25,7 +25,7 @@ cd web && bun install && bun run dev
 cd web && bun install && bun run build && cd .. && go build ./cmd/scribekit
 ```
 
-运行 `scribekit [-addr 127.0.0.1:7788] [-data <目录>] [-no-browser]`，数据默认存在系统配置目录下的 `ScribeKit/scribekit.db`。
+运行 `scribekit [-addr 127.0.0.1:7788] [-data <目录>] [-no-browser] [-jsonlog]`，数据默认存在系统配置目录下的 `ScribeKit/scribekit.db`。
 
 ## 配置模型
 
@@ -35,7 +35,7 @@ cd web && bun install && bun run build && cd .. && go build ./cmd/scribekit
 
 ## AI 日志
 
-后端启动后通过 Zap 向标准错误输出 JSON 日志，不对 AI 日志采样。覆盖 WebSocket AI 请求、模型配置与构建缓存、连接测试、提示词渲染、Analyzer 并发等待与分析缓存、JSON 修复重试、Scaffolder 规划与建议保存/清理，以及 Eino 组件和工具调用。每次操作记录开始、结束、耗时、失败、取消或超时；流式响应记录片段数和输出字节数，模型提供用量时记录 Token 数。
+后端统一通过 Zap 向标准错误输出日志，默认使用彩色控制台格式，以不同颜色区分日志级别；添加 `--jsonlog` 参数切换为无颜色的 JSON 日志，例如 `go run ./cmd/scribekit -no-browser --jsonlog`。两种格式都不采样。覆盖启动与退出、API 错误、WebSocket AI 请求、模型配置与构建缓存、连接测试、提示词渲染、Analyzer 并发等待与分析缓存、JSON 修复重试、Scaffolder 规划与建议保存/清理，以及 Eino 组件和工具调用。每次操作记录开始、结束、耗时、失败、取消或超时；流式响应记录片段数和输出字节数，模型提供用量时记录 Token 数。
 
 可用 `request_id` 关联一次 WebSocket 请求，`span_id` 区分具体操作。日志不输出 API Key、模型地址、完整提示词、文章正文或工具参数/结果正文；错误字段保留底层错误信息。提示词渲染日志只有模板名、耗时和输出字节数。
 

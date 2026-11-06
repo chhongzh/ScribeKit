@@ -15,6 +15,7 @@ type Config struct {
 	Addr      string
 	DataDir   string
 	NoBrowser bool
+	JSONLog   bool
 }
 
 func DefaultDataDir() (string, error) {
@@ -33,6 +34,7 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	fs.StringVar(&c.Addr, "addr", DefaultAddr, "监听地址")
 	fs.StringVar(&c.DataDir, "data", "", "数据目录（默认为用户配置目录下的 ScribeKit）")
 	fs.BoolVar(&c.NoBrowser, "no-browser", false, "启动后不自动打开浏览器")
+	fs.BoolVar(&c.JSONLog, "jsonlog", false, "输出 JSON 日志（默认输出彩色控制台日志）")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}
