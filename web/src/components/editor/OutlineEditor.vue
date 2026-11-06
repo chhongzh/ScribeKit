@@ -72,7 +72,7 @@ onBeforeUnmount(() => {
     </StateBlock>
     <div v-else-if="detail" class="sk-outline">
       <v-text-field v-model="name" label="文集名称" class="mb-4" aria-label="文集名称" />
-      <p class="sk-muted text-body-2">
+      <p class="sk-muted text-body-2 mb-4">
         总纲是这个文集里所有文章共用的约束：立意、人物设定、语言风格、不能写的东西。Scaffolder 为这个文集里的任何一篇生成内容时都会先读它。可以不写。
       </p>
       <ExpandableTextarea
