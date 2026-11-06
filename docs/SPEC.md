@@ -288,6 +288,16 @@ Scaffolder 按文章 genre 加载匹配的指引的“用于 Scaffolder”节，
 - 每个 WS 请求绑定 context，`cancel` 或连接断开时取消。
 - 生成前置检查：标题和梗概都非空，否则 `needs_user_input`。`complete` 模式要求光标前有用户文字。
 
-## 10. 提交规范
+## 10. 提示词工程（internal/prompt）
+
+所有发给模型的提示词（系统提示、用户消息模板、工具描述、JSON 修复重试提示）集中在 `internal/prompt` 包，其他包不得内联提示词字符串。
+
+- 模板文件：`internal/prompt/templates/<agent>/<name>.jinja`，公共片段放 `templates/_partials/`（产品原则、禁用套话清单、JSON 输出格式说明、段落类型说明），`go:embed` 加载，Jinja2 语法。
+- 渲染：eino 的 `schema.Jinja2` 底层是 gonja，但它逐条 message 用无 loader 的字符串渲染，`{% include %}` / `{% import %}` 不可用。因此本包直接用 gonja（与 eino 同版本依赖）配一个基于 embed FS 的 loader 渲染，产出 `[]*schema.Message` 交给 eino agent。
+- 动态展开：模板只接收结构化变量（文章元信息、段落列表、带编号的半句、指引小节、素材片段、总纲、mode、paragraphKind、genre 等），条件、循环、可选块都写在模板里，Go 代码里不拼接提示词文本。
+- 每个模板对应一个强类型变量结构体和渲染函数，例如 `prompt.AnalyzerParagraph(vars AnalyzerParagraphVars) ([]*schema.Message, error)`。包初始化时预解析全部模板，语法错误在启动与单测时立即暴露。
+- 单测：每个模板用固定变量渲染并与 golden 文件比对（`internal/prompt/testdata/*.golden`，`-update` 标志重写），覆盖各 mode、paragraphKind、genre 分支。
+
+## 11. 提交规范
 
 按功能提交，提交信息中文或英文均可，不得包含任何 Co-Authored-By 或合作者署名行。
