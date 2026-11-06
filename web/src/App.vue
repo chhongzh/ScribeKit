@@ -107,6 +107,14 @@ onBeforeUnmount(() => {
 
 const SIDEBAR_MIN = 200
 const SIDEBAR_MAX = 520
+
+function hideLeavingPanel(element: Element) {
+  (element as HTMLElement).inert = true
+}
+
+function showEnteringPanel(element: Element) {
+  (element as HTMLElement).inert = false
+}
 </script>
 
 <template>
@@ -114,45 +122,55 @@ const SIDEBAR_MAX = 520
     <div class="sk-shell">
       <div class="sk-main">
         <ActivityBar />
-        <template v-if="ui.layout.sidebarOpen">
-          <aside class="sk-sidebar bg-sk-panel" :style="{ width: `${ui.layout.sidebarWidth}px` }" aria-label="侧边栏">
-            <ExplorerPanel v-if="ui.activity === 'explorer'" />
-            <MaterialsPanel v-else-if="ui.activity === 'materials'" />
-            <GuidesPanel v-else-if="ui.activity === 'guides'" />
-          </aside>
-          <SplitHandle
-            v-model="ui.layout.sidebarWidth"
-            direction="vertical"
-            :min="SIDEBAR_MIN"
-            :max="SIDEBAR_MAX"
-            label="调整侧边栏宽度"
-          />
-        </template>
+        <Transition name="sk-panel-inline" @before-enter="showEnteringPanel" @before-leave="hideLeavingPanel" @leave-cancelled="showEnteringPanel">
+          <div v-if="ui.layout.sidebarOpen" class="sk-side-region" :style="{ width: `${ui.layout.sidebarWidth + 1}px`, '--sk-panel-size': `${ui.layout.sidebarWidth}px` }">
+            <aside class="sk-sidebar bg-sk-panel" aria-label="侧边栏">
+              <Transition name="sk-view" mode="out-in">
+                <div :key="ui.activity" class="sk-sidebar-content">
+                  <ExplorerPanel v-if="ui.activity === 'explorer'" />
+                  <MaterialsPanel v-else-if="ui.activity === 'materials'" />
+                  <GuidesPanel v-else-if="ui.activity === 'guides'" />
+                </div>
+              </Transition>
+            </aside>
+            <SplitHandle
+              v-model="ui.layout.sidebarWidth"
+              direction="vertical"
+              :min="SIDEBAR_MIN"
+              :max="SIDEBAR_MAX"
+              label="调整侧边栏宽度"
+            />
+          </div>
+        </Transition>
         <div class="sk-center">
           <EditorArea class="sk-editor-area" />
-          <template v-if="ui.layout.panelOpen">
-            <SplitHandle
-              v-model="ui.layout.panelHeight"
-              direction="horizontal"
-              :min="96"
-              :max="520"
-              invert
-              label="调整底部面板高度"
-            />
-            <BottomPanel class="sk-bottom" :style="{ height: `${ui.layout.panelHeight}px` }" />
-          </template>
+          <Transition name="sk-panel-block" @before-enter="showEnteringPanel" @before-leave="hideLeavingPanel" @leave-cancelled="showEnteringPanel">
+            <div v-if="ui.layout.panelOpen" class="sk-bottom-region" :style="{ height: `${ui.layout.panelHeight + 1}px`, '--sk-panel-size': `${ui.layout.panelHeight}px` }">
+              <SplitHandle
+                v-model="ui.layout.panelHeight"
+                direction="horizontal"
+                :min="96"
+                :max="520"
+                invert
+                label="调整底部面板高度"
+              />
+              <BottomPanel class="sk-bottom" />
+            </div>
+          </Transition>
         </div>
-        <template v-if="ui.layout.inspectorOpen">
-          <SplitHandle
-            v-model="ui.layout.inspectorWidth"
-            direction="vertical"
-            :min="260"
-            :max="560"
-            invert
-            label="调整检查器宽度"
-          />
-          <InspectorPanel class="sk-inspector" :style="{ width: `${ui.layout.inspectorWidth}px` }" />
-        </template>
+        <Transition name="sk-panel-inline" @before-enter="showEnteringPanel" @before-leave="hideLeavingPanel" @leave-cancelled="showEnteringPanel">
+          <div v-if="ui.layout.inspectorOpen" class="sk-side-region" :style="{ width: `${ui.layout.inspectorWidth + 1}px`, '--sk-panel-size': `${ui.layout.inspectorWidth}px` }">
+            <SplitHandle
+              v-model="ui.layout.inspectorWidth"
+              direction="vertical"
+              :min="260"
+              :max="560"
+              invert
+              label="调整检查器宽度"
+            />
+            <InspectorPanel class="sk-inspector" />
+          </div>
+        </Transition>
       </div>
       <StatusBar />
     </div>
@@ -166,6 +184,7 @@ const SIDEBAR_MAX = 520
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 .sk-main {
@@ -180,6 +199,24 @@ const SIDEBAR_MAX = 520
   flex-direction: column;
   border-right: 1px solid var(--sk-line);
   overflow: hidden;
+  width: var(--sk-panel-size);
+}
+.sk-side-region {
+  display: flex;
+  flex: none;
+  min-width: 0;
+}
+.sk-sidebar-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.sk-bottom-region {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  min-height: 0;
 }
 .sk-center {
   flex: 1;
@@ -193,9 +230,11 @@ const SIDEBAR_MAX = 520
 }
 .sk-bottom {
   flex: none;
+  height: var(--sk-panel-size);
 }
 .sk-inspector {
   flex: none;
   border-left: 1px solid var(--sk-line);
+  width: var(--sk-panel-size);
 }
 </style>

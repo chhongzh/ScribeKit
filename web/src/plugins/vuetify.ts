@@ -21,5 +21,8 @@ export const vuetify = createVuetify({
     VSelect: { variant: 'outlined', density: 'compact', hideDetails: 'auto' },
     VSwitch: { color: 'primary', density: 'compact', hideDetails: true, inset: false },
     VTooltip: { location: 'bottom', openDelay: 450 },
+    VMenu: { transition: 'sk-menu' },
+    VDialog: { transition: 'sk-dialog' },
+    VSnackbar: { transition: 'sk-view' },
   },
 })

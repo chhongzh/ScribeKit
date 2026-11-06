@@ -102,36 +102,38 @@ watch(
       <v-btn :icon="mdiChevronDown" size="x-small" density="comfortable" aria-label="收起底部面板（Ctrl+J）" title="收起（Ctrl+J）" @click="ui.layout.panelOpen = false" />
     </div>
 
-    <div v-if="ui.panelTab === 'problems'" class="sk-bottom-body" role="tabpanel" aria-label="问题">
-      <StateBlock v-if="!editor.activeSession" state="empty" text="打开一篇文章后，这里列出 Analyzer 指出的问题。" />
-      <StateBlock
-        v-else-if="!analyzedAny"
-        state="empty"
-        text="这篇还没有有效的分析结果。点编辑器工具条上的“分析全文”，或在设置里打开自动分析。"
-      />
-      <StateBlock v-else-if="problems.length === 0" state="empty" text="已分析的段落里，Analyzer 没有指出问题。" />
-      <ul v-else class="sk-problems">
-        <li v-for="p in problems" :key="p.id">
-          <button type="button" class="sk-problem" @click="go(p)">
-            <span class="sk-sev" :class="`sk-sev-${p.d.severity}`">{{ SEVERITY[p.d.severity] }}</span>
-            <span class="sk-problem-msg">{{ p.d.message }}</span>
-            <span class="sk-problem-loc">第 {{ p.paragraph }} 段{{ p.half !== null ? ` · 第 ${p.half + 1} 半句` : '' }} · “{{ p.excerpt }}”</span>
-          </button>
-        </li>
-      </ul>
-    </div>
+    <Transition name="sk-view" mode="out-in">
+      <div v-if="ui.panelTab === 'problems'" key="problems" class="sk-bottom-body" role="tabpanel" aria-label="问题">
+        <StateBlock v-if="!editor.activeSession" state="empty" text="打开一篇文章后，这里列出 Analyzer 指出的问题。" />
+        <StateBlock
+          v-else-if="!analyzedAny"
+          state="empty"
+          text="这篇还没有有效的分析结果。点编辑器工具条上的“分析全文”，或在设置里打开自动分析。"
+        />
+        <StateBlock v-else-if="problems.length === 0" state="empty" text="已分析的段落里，Analyzer 没有指出问题。" />
+        <ul v-else class="sk-problems">
+          <li v-for="p in problems" :key="p.id">
+            <button type="button" class="sk-problem" @click="go(p)">
+              <span class="sk-sev" :class="`sk-sev-${p.d.severity}`">{{ SEVERITY[p.d.severity] }}</span>
+              <span class="sk-problem-msg">{{ p.d.message }}</span>
+              <span class="sk-problem-loc">第 {{ p.paragraph }} 段{{ p.half !== null ? ` · 第 ${p.half + 1} 半句` : '' }} · “{{ p.excerpt }}”</span>
+            </button>
+          </li>
+        </ul>
+      </div>
 
-    <div v-else ref="outEl" class="sk-bottom-body sk-output" role="tabpanel" aria-label="输出">
-      <StateBlock v-if="log.entries.length === 0" state="empty" text="还没有 Agent 请求。分析、生成、取消都会在这里留一行记录。" />
-      <ol v-else class="sk-log">
-        <li v-for="e in log.entries" :key="e.seq" :class="`sk-log-${e.dir}`">
-          <span class="sk-log-time">{{ e.time }}</span>
-          <span class="sk-log-dir">{{ e.dir === 'out' ? '发出' : e.dir === 'in' ? '收到' : '连接' }}</span>
-          <span class="sk-log-text">{{ e.text }}</span>
-          <span v-if="e.detail" class="sk-log-detail">{{ e.detail }}</span>
-        </li>
-      </ol>
-    </div>
+      <div v-else key="output" ref="outEl" class="sk-bottom-body sk-output" role="tabpanel" aria-label="输出">
+        <StateBlock v-if="log.entries.length === 0" state="empty" text="还没有 Agent 请求。分析、生成、取消都会在这里留一行记录。" />
+        <ol v-else class="sk-log">
+          <li v-for="e in log.entries" :key="e.seq" :class="`sk-log-${e.dir}`">
+            <span class="sk-log-time">{{ e.time }}</span>
+            <span class="sk-log-dir">{{ e.dir === 'out' ? '发出' : e.dir === 'in' ? '收到' : '连接' }}</span>
+            <span class="sk-log-text">{{ e.text }}</span>
+            <span v-if="e.detail" class="sk-log-detail">{{ e.detail }}</span>
+          </li>
+        </ol>
+      </div>
+    </Transition>
   </section>
 </template>
 

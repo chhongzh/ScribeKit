@@ -32,12 +32,14 @@ const tabs: { id: InspectorTab; label: string }[] = [
       <v-btn :icon="mdiChevronRight" size="x-small" density="comfortable" aria-label="收起检查器（Ctrl+Alt+B）" title="收起（Ctrl+Alt+B）" @click="ui.layout.inspectorOpen = false" />
     </div>
     <div class="sk-insp-body" role="tabpanel">
-      <StateBlock v-if="!editor.activeSession" state="empty" text="打开一篇文章后，这里显示它的待评审建议、描写分布和全文结构。" />
-      <template v-else>
-        <SuggestionList v-if="ui.inspectorTab === 'suggestions'" :key="`s${editor.activeSession.articleId}`" :session="editor.activeSession" />
-        <DescDistribution v-else-if="ui.inspectorTab === 'distribution'" :session="editor.activeSession" />
-        <StructureView v-else :session="editor.activeSession" />
-      </template>
+      <Transition name="sk-view" mode="out-in">
+        <StateBlock v-if="!editor.activeSession" state="empty" text="打开一篇文章后，这里显示它的待评审建议、描写分布和全文结构。" />
+        <div v-else :key="`${editor.activeSession.articleId}:${ui.inspectorTab}`">
+          <SuggestionList v-if="ui.inspectorTab === 'suggestions'" :key="`s${editor.activeSession.articleId}`" :session="editor.activeSession" />
+          <DescDistribution v-else-if="ui.inspectorTab === 'distribution'" :session="editor.activeSession" />
+          <StructureView v-else :session="editor.activeSession" />
+        </div>
+      </Transition>
     </div>
   </aside>
 </template>

@@ -350,7 +350,9 @@ const legend = DESC_KINDS.filter((d) => d.colored)
     </div>
 
     <div class="sk-scroll">
-      <SearchPanel v-if="searchOpen && active" ref="searchPanel" v-model:replace="searchReplace" :session="s" @close="searchOpen = false; s.focus()" />
+      <Transition name="sk-menu">
+        <SearchPanel v-if="searchOpen && active" ref="searchPanel" v-model:replace="searchReplace" :session="s" @close="searchOpen = false; s.focus()" />
+      </Transition>
       <div ref="paper" class="sk-paper" :style="{ fontSize: `${18 * ui.editorZoom / 100}px`, '--sk-paper-width': `${ui.layout.editorWidth}px` }" :class="{ 'sk-genre-poetry': s.meta.genre === 'poetry' }">
         <ArticleHeader :session="s" @enter-body="s.focus()" />
         <div ref="host" class="sk-host" />

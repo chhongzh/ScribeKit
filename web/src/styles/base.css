@@ -12,6 +12,89 @@
   --sk-font-code: ui-monospace, 'Cascadia Mono', 'SFMono-Regular', Consolas, monospace;
   --sk-line: rgba(var(--v-border-color), var(--v-border-opacity));
   --sk-muted: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity));
+  --sk-motion-fast: 120ms;
+  --sk-motion-normal: 180ms;
+  --sk-motion-layout: 260ms;
+  --sk-motion-ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+:where(.v-application, .v-application *, .v-overlay-container *) {
+  transition-property: color, background-color, border-color, box-shadow, opacity;
+  transition-duration: var(--sk-motion-normal);
+  transition-timing-function: var(--sk-motion-ease);
+}
+
+.sk-view-enter-active,
+.sk-menu-enter-active,
+.sk-dialog-enter-active {
+  transition: opacity var(--sk-motion-normal) var(--sk-motion-ease), transform var(--sk-motion-normal) var(--sk-motion-ease);
+}
+
+.sk-view-leave-active,
+.sk-menu-leave-active,
+.sk-dialog-leave-active {
+  transition: opacity var(--sk-motion-fast) var(--sk-motion-ease), transform var(--sk-motion-fast) var(--sk-motion-ease);
+  pointer-events: none;
+}
+
+.sk-view-enter-from,
+.sk-view-leave-to,
+.sk-menu-enter-from,
+.sk-menu-leave-to,
+.sk-dialog-enter-from,
+.sk-dialog-leave-to {
+  opacity: 0;
+}
+
+.sk-menu-enter-from,
+.sk-menu-leave-to {
+  transform: translateY(-4px) scale(0.98);
+}
+
+.sk-dialog-enter-from,
+.sk-dialog-leave-to {
+  transform: translateY(8px) scale(0.99);
+}
+
+.sk-panel-inline-enter-active,
+.sk-panel-inline-leave-active {
+  overflow: hidden;
+  transition: width var(--sk-motion-layout) var(--sk-motion-ease), opacity var(--sk-motion-normal) var(--sk-motion-ease);
+}
+
+.sk-panel-inline-enter-from,
+.sk-panel-inline-leave-to {
+  width: 0 !important;
+  opacity: 0;
+}
+
+.sk-panel-block-enter-active,
+.sk-panel-block-leave-active {
+  overflow: hidden;
+  transition: height var(--sk-motion-layout) var(--sk-motion-ease), opacity var(--sk-motion-normal) var(--sk-motion-ease);
+}
+
+.sk-panel-block-enter-from,
+.sk-panel-block-leave-to {
+  height: 0 !important;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --sk-motion-fast: 0ms;
+    --sk-motion-normal: 0ms;
+    --sk-motion-layout: 0ms;
+  }
+
+  .v-application *,
+  .v-overlay-container * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 html,

@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { mdiClose } from '@mdi/js'
-import { computed } from 'vue'
+import { mdiClose, mdiDotsHorizontal } from '@mdi/js'
+import { computed, ref } from 'vue'
 import { useDialogStore } from '../../stores/dialogs'
-import { tabKey, useEditorStore, type Tab } from '../../stores/editor'
+import { tabKey, tabsToClose, useEditorStore, type Tab, type TabCloseMode } from '../../stores/editor'
 import { useWorkspaceStore } from '../../stores/workspace'
 import SettingsView from '../settings/SettingsView.vue'
 import StateBlock from '../StateBlock.vue'
+import ContextMenu, { type ContextAction } from '../ContextMenu.vue'
 import ArticleEditor from './ArticleEditor.vue'
 import GuideView from './GuideView.vue'
 import OutlineEditor from './OutlineEditor.vue'
@@ -13,6 +14,10 @@ import OutlineEditor from './OutlineEditor.vue'
 const editor = useEditorStore()
 const workspace = useWorkspaceStore()
 const dialogs = useDialogStore()
+const contextOpen = ref(false)
+const contextAt = ref<[number, number]>([0, 0])
+const contextTab = ref<Tab | null>(null)
+let contextOrigin: HTMLElement | null = null
 
 function label(t: Tab): string {
   switch (t.type) {
@@ -35,41 +40,87 @@ function dirty(t: Tab): boolean {
   return !!s && (s.sync.state.status === 'saving' || s.sync.state.status === 'error')
 }
 
-async function close(t: Tab) {
-  const ok = await editor.close(t)
-  if (ok) return
-  const discard = await dialogs.confirm({
-    title: '有改动没有保存',
-    text: '这篇文章有改动没能写入后端。直接关闭会丢掉这些改动。',
+async function close(t: Tab, mode: TabCloseMode = 'current') {
+  contextOpen.value = false
+  await editor.closeTabs(t, mode, (tab) => dialogs.confirm({
+    title: `“${label(tab)}”有改动没有保存`,
+    text: '这篇文章有改动没能写入后端。直接关闭会丢掉这些改动；取消会停止本次关闭操作。',
     confirm: '丢弃改动并关闭',
     danger: true,
-  })
-  if (discard) await editor.close(t, true)
+  }))
 }
+
+function showContext(event: MouseEvent | KeyboardEvent, tab: Tab) {
+  contextOrigin = event.currentTarget as HTMLElement
+  const rect = contextOrigin.getBoundingClientRect()
+  contextAt.value = event instanceof MouseEvent && event.button === 2
+    ? [event.clientX, event.clientY]
+    : [rect.left, rect.bottom]
+  contextTab.value = tab
+  contextOpen.value = true
+}
+
+function onTabKey(event: KeyboardEvent, tab: Tab) {
+  if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+  event.preventDefault()
+  event.stopPropagation()
+  showContext(event, tab)
+}
+
+function restoreContextFocus() {
+  if (dialogs.current) return
+  const target = contextOrigin?.isConnected
+    ? contextOrigin
+    : document.getElementById(`sk-tab-${editor.active}`)
+  target?.focus({ preventScroll: true })
+}
+
+const contextActions = computed<ContextAction[]>(() => {
+  const target = contextTab.value
+  if (!target) return []
+  return ([
+    { title: '关闭当前', mode: 'current', hint: 'Delete' },
+    { title: '关闭右侧', mode: 'right' },
+    { title: '关闭全部', mode: 'all' },
+    { title: '关闭其他', mode: 'others' },
+  ] as const).map((action) => ({
+    title: action.title,
+    hint: 'hint' in action ? action.hint : undefined,
+    disabled: editor.closingTabs || tabsToClose(editor.tabs, target, action.mode).length === 0,
+    run: () => { void close(target, action.mode) },
+  }))
+})
 
 const hasTabs = computed(() => editor.tabs.length > 0)
 </script>
 
 <template>
   <section class="sk-editor-area bg-sk-editor" aria-label="编辑器">
-    <v-tabs v-if="hasTabs" :model-value="editor.active" class="bg-sk-panel" color="primary" show-arrows aria-label="打开的标签页" @update:model-value="(value) => { const tab = editor.tabs.find((t) => tabKey(t) === value); if (tab) editor.activate(tab) }">
-      <v-tab
-        v-for="t in editor.tabs"
-        :key="tabKey(t)"
-        :id="`sk-tab-${tabKey(t)}`"
-        :value="tabKey(t)"
-        @click="editor.activate(t)"
-        @keydown.delete.prevent="close(t)"
-        @auxclick.middle="close(t)"
-      >
+    <div v-if="hasTabs" class="sk-tab-bar bg-sk-panel">
+      <v-tabs :model-value="editor.active" class="sk-tab-strip" color="primary" show-arrows aria-label="打开的标签页" @update:model-value="(value) => { const tab = editor.tabs.find((t) => tabKey(t) === value); if (tab) editor.activate(tab) }">
+        <v-tab
+          v-for="t in editor.tabs"
+          :key="tabKey(t)"
+          :id="`sk-tab-${tabKey(t)}`"
+          :value="tabKey(t)"
+          @click="editor.activate(t)"
+          @keydown.delete.prevent="close(t)"
+          @auxclick.middle="close(t)"
+          @contextmenu.stop.prevent="showContext($event, t)"
+          @keydown="onTabKey($event, t)"
+          aria-haspopup="menu"
+        >
           <span class="sk-tab-label">{{ label(t) }}</span>
           <span v-if="dirty(t)" class="sk-tab-dirty" aria-label="有未保存的改动">●</span>
-        <template #append>
-        <v-icon :icon="mdiClose" size="18" role="button" tabindex="0" :aria-label="`关闭 ${label(t)}`" title="关闭（Delete）" @click.stop="close(t)" @keydown.enter.stop.prevent="close(t)" @keydown.space.stop.prevent="close(t)">
-        </v-icon>
-        </template>
-      </v-tab>
-    </v-tabs>
+          <template #append>
+            <v-icon :icon="mdiClose" size="18" role="button" tabindex="0" :aria-label="`关闭 ${label(t)}`" title="关闭（Delete）" @click.stop="close(t)" @keydown.enter.stop.prevent="close(t)" @keydown.space.stop.prevent="close(t)" />
+          </template>
+        </v-tab>
+      </v-tabs>
+      <v-btn :icon="mdiDotsHorizontal" class="sk-tab-menu" aria-label="标签页操作" title="标签页操作（Shift+F10）" :disabled="editor.closingTabs" @click="editor.activeTab && showContext($event, editor.activeTab)" />
+    </div>
+
+    <ContextMenu v-model="contextOpen" :at="contextAt" :label="contextTab ? `标签页操作：${label(contextTab)}` : '标签页操作'" :actions="contextActions" @closed="restoreContextFocus" />
 
     <div class="sk-tab-body">
       <div v-if="!hasTabs" class="sk-welcome">
@@ -84,19 +135,21 @@ const hasTabs = computed(() => editor.tabs.length > 0)
       </div>
 
       <template v-for="t in editor.tabs" :key="tabKey(t)">
-        <div v-show="editor.active === tabKey(t)" class="sk-tab-pane" role="tabpanel" :aria-label="label(t)">
-          <template v-if="t.type === 'article'">
-            <StateBlock v-if="editor.open[tabKey(t)]?.loading" state="loading" text="正在打开文章" />
-            <StateBlock v-else-if="editor.open[tabKey(t)]?.error" state="error" :text="`文章打不开：${editor.open[tabKey(t)]?.error}`">
-              <v-btn variant="outlined" size="small" @click="editor.loadArticle(t.id)">再试一次</v-btn>
-              <v-btn size="small" @click="close(t)">关闭标签页</v-btn>
-            </StateBlock>
-            <ArticleEditor v-else-if="editor.sessions.get(t.id)" :session="editor.sessions.get(t.id)!" :active="editor.active === tabKey(t)" />
-          </template>
-          <OutlineEditor v-else-if="t.type === 'outline'" :collection-id="t.id" />
-          <GuideView v-else-if="t.type === 'guide'" :guide-id="t.id" />
-          <SettingsView v-else-if="t.type === 'settings'" />
-        </div>
+        <Transition name="sk-view">
+          <div v-show="editor.active === tabKey(t)" class="sk-tab-pane" role="tabpanel" :aria-label="label(t)" :aria-labelledby="`sk-tab-${tabKey(t)}`" :inert="editor.active !== tabKey(t)">
+            <template v-if="t.type === 'article'">
+              <StateBlock v-if="editor.open[tabKey(t)]?.loading" state="loading" text="正在打开文章" />
+              <StateBlock v-else-if="editor.open[tabKey(t)]?.error" state="error" :text="`文章打不开：${editor.open[tabKey(t)]?.error}`">
+                <v-btn variant="outlined" size="small" @click="editor.loadArticle(t.id)">再试一次</v-btn>
+                <v-btn size="small" @click="close(t)">关闭标签页</v-btn>
+              </StateBlock>
+              <ArticleEditor v-else-if="editor.sessions.get(t.id)" :session="editor.sessions.get(t.id)!" :active="editor.active === tabKey(t)" />
+            </template>
+            <OutlineEditor v-else-if="t.type === 'outline'" :collection-id="t.id" />
+            <GuideView v-else-if="t.type === 'guide'" :guide-id="t.id" />
+            <SettingsView v-else-if="t.type === 'settings'" />
+          </div>
+        </Transition>
       </template>
     </div>
   </section>
@@ -107,6 +160,22 @@ const hasTabs = computed(() => editor.tabs.length > 0)
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+.sk-tab-bar {
+  display: flex;
+  align-items: center;
+  flex: none;
+  min-width: 0;
+  border-bottom: 1px solid var(--sk-line);
+}
+.sk-tab-strip {
+  flex: 1;
+  min-width: 0;
+}
+.sk-tab-menu {
+  flex: none;
+  width: 44px;
+  height: 44px;
 }
 .sk-tabs {
   flex: none;

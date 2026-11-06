@@ -21,10 +21,18 @@ function focusFirst() {
 
 <template>
   <v-menu v-model="open" :target="at" location="bottom start" :max-width="'min(360px, calc(100vw - 16px))'" @after-enter="focusFirst" @after-leave="emit('closed')">
-    <v-list ref="list" density="compact" role="menu" :aria-label="label">
-      <v-list-item v-for="action in actions" :key="action.title" role="menuitem" :title="action.title" :disabled="action.disabled" :base-color="action.danger ? 'error' : undefined" @click="action.run">
+    <v-list ref="list" class="sk-context-actions" density="compact" role="menu" :aria-label="label">
+      <v-list-item v-for="action in actions" :key="action.title" role="menuitem" :title="action.title" :disabled="action.disabled" :aria-disabled="action.disabled || undefined" :base-color="action.danger ? 'error' : undefined" @click="action.run">
         <template v-if="action.hint" #append><span class="sk-kbd ml-4">{{ action.hint }}</span></template>
       </v-list-item>
     </v-list>
   </v-menu>
 </template>
+
+<style scoped>
+@media (pointer: coarse) {
+  .sk-context-actions :deep(.v-list-item) {
+    min-height: 44px;
+  }
+}
+</style>

@@ -17,6 +17,19 @@ export function tabKey(t: Tab): string {
   return `${t.type}:${t.id}`
 }
 
+export type TabCloseMode = 'current' | 'right' | 'all' | 'others'
+
+export function tabsToClose(tabs: readonly Tab[], target: Tab, mode: TabCloseMode): Tab[] {
+  const index = tabs.findIndex((tab) => tabKey(tab) === tabKey(target))
+  if (index < 0) return []
+  switch (mode) {
+    case 'current': return tabs.slice(index, index + 1)
+    case 'right': return tabs.slice(index + 1)
+    case 'all': return [...tabs]
+    case 'others': return tabs.filter((tab) => tabKey(tab) !== tabKey(target))
+  }
+}
+
 interface OpenState {
   loading: boolean
   error: string
@@ -26,6 +39,7 @@ interface OpenState {
 export const useEditorStore = defineStore('editor', () => {
   const tabs = ref<Tab[]>([])
   const active = ref<string | null>(null)
+  const closingTabs = ref(false)
   const sessions = shallowReactive(new Map<number, ArticleSession>())
   const open = reactive<Record<string, OpenState>>({})
   const outlines = reactive<Record<number, CollectionDetail>>({})
@@ -54,6 +68,7 @@ export const useEditorStore = defineStore('editor', () => {
     open[k] = { loading: true, error: '' }
     try {
       const detail = await api.getArticle(id)
+      if (!tabs.value.some((tab) => tabKey(tab) === k)) return
       const session = markRaw(new ArticleSession(detail))
       sessions.set(id, session)
       useAnalysisStore().attach(session)
@@ -131,6 +146,22 @@ export const useEditorStore = defineStore('editor', () => {
     return true
   }
 
+  async function closeTabs(target: Tab, mode: TabCloseMode, confirmDiscard: (tab: Tab) => Promise<boolean>): Promise<boolean> {
+    if (closingTabs.value) return false
+    const targets = tabsToClose(tabs.value, target, mode)
+    closingTabs.value = true
+    try {
+      for (const tab of targets) {
+        if (await close(tab)) continue
+        if (!await confirmDiscard(tab)) return false
+        await close(tab, true)
+      }
+      return true
+    } finally {
+      closingTabs.value = false
+    }
+  }
+
   /** 文章或文集在别处被删除时，关掉对应标签页。 */
   function forget(t: Tab) {
     void close(t, true)
@@ -139,6 +170,7 @@ export const useEditorStore = defineStore('editor', () => {
   return {
     tabs,
     active,
+    closingTabs,
     sessions,
     open,
     outlines,
@@ -153,6 +185,7 @@ export const useEditorStore = defineStore('editor', () => {
     openGuide,
     openSettings,
     close,
+    closeTabs,
     forget,
   }
 })
