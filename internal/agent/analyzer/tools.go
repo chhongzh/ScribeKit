@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -39,12 +40,24 @@ type halfDiagnostic struct {
 }
 
 type halfSubmission struct {
-	Index       *int             `json:"index" jsonschema:"required,description=半句编号，从 0 开始"`
-	Desc        []string         `json:"desc,omitempty"`
-	Rhetoric    []string         `json:"rhetoric,omitempty"`
-	Relations   []halfRelation   `json:"relations,omitempty"`
-	Marks       []halfMark       `json:"marks,omitempty"`
-	Diagnostics []halfDiagnostic `json:"diagnostics,omitempty"`
+	argumentError string
+	Index         *int             `json:"index" jsonschema:"required,description=半句编号，从 0 开始"`
+	Desc          []string         `json:"desc,omitempty"`
+	Rhetoric      []string         `json:"rhetoric,omitempty"`
+	Relations     []halfRelation   `json:"relations,omitempty"`
+	Marks         []halfMark       `json:"marks,omitempty"`
+	Diagnostics   []halfDiagnostic `json:"diagnostics,omitempty"`
+}
+
+func unmarshalHalfSubmission(ctx context.Context, arguments string) (any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var input halfSubmission
+	if err := json.Unmarshal([]byte(arguments), &input); err != nil {
+		return halfSubmission{argumentError: "参数必须是完整的 JSON 对象，字段类型须符合工具定义；请重新提交未完成的半句"}, nil
+	}
+	return input, nil
 }
 
 type halfFeedback struct {
@@ -84,6 +97,9 @@ func (collector *halfCollector) submit(ctx context.Context, input halfSubmission
 	defer collector.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return halfFeedback{}, err
+	}
+	if input.argumentError != "" {
+		return collector.feedback(input.argumentError), nil
 	}
 	if input.Index == nil || *input.Index < 0 || *input.Index >= len(collector.halves) {
 		return collector.feedback("index 必须是给定的半句编号"), nil
@@ -162,7 +178,7 @@ func (s *Service) analyzeHalves(ctx context.Context, handle llm.Handle, messages
 			}
 		}
 		return feedback, err
-	})
+	}, utils.WithUnmarshalArguments(unmarshalHalfSubmission))
 	if err != nil {
 		return nil, err
 	}

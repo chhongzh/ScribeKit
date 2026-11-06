@@ -3,6 +3,7 @@ package logging
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -61,6 +62,34 @@ func TestStartClassifiesCancellationAndTimeout(t *testing.T) {
 		if logs.FilterMessage(test.message).Len() != 1 {
 			t.Fatalf("missing %s", test.message)
 		}
+	}
+}
+
+func TestCompletionSignalOnlyClassifiesMatchingErrors(t *testing.T) {
+	signal := errors.New("tools complete")
+	for _, test := range []struct {
+		name    string
+		err     error
+		message string
+	}{
+		{"direct", signal, "ai.completed"},
+		{"wrapped", fmt.Errorf("node failed: %w", signal), "ai.completed"},
+		{"same text", errors.New("tools complete"), "ai.failed"},
+		{"real failure", errors.New("unexpected EOF"), "ai.failed"},
+		{"canceled", context.Canceled, "ai.canceled"},
+		{"timeout", context.DeadlineExceeded, "ai.timeout"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			core, logs := observer.New(zap.InfoLevel)
+			ctx := context.WithValue(context.Background(), loggerKey{}, zap.New(core))
+			ctx = WithCompletionSignal(ctx, signal)
+			handler := EinoHandler()
+			ctx = handler.OnStart(ctx, &callbacks.RunInfo{Name: "AfterToolCalls"}, nil)
+			handler.OnError(ctx, nil, test.err)
+			if logs.FilterMessage(test.message).Len() != 1 {
+				t.Fatalf("expected %s, got %+v", test.message, logs.All())
+			}
+		})
 	}
 }
 

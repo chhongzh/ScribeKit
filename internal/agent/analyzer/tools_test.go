@@ -2,15 +2,22 @@ package analyzer
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/chhongzh/scribekit/internal/agent"
 	"github.com/chhongzh/scribekit/internal/llm"
+	"github.com/chhongzh/scribekit/internal/logging"
+	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestHalfCollectorValidatesAndRepairs(t *testing.T) {
@@ -127,7 +134,11 @@ func TestHalfAgentExitsAfterToolsAndRepairsLocally(t *testing.T) {
 		t.Run(fmt.Sprint(repair), func(t *testing.T) {
 			fake := &halfModel{testing: t, repair: repair}
 			service := &Service{sem: make(chan struct{}, 1)}
-			ctx := agent.WithUsageSink(context.Background(), func(*schema.TokenUsage) {})
+			core, logs := observer.New(zap.InfoLevel)
+			restore := zap.ReplaceGlobals(zap.New(core))
+			defer restore()
+			ctx := callbacks.InitCallbacks(context.Background(), nil, logging.EinoHandler())
+			ctx = agent.WithUsageSink(ctx, func(*schema.TokenUsage) {})
 			result, err := service.analyzeHalves(ctx, llm.Handle{Model: fake, Name: "fake"}, []*schema.Message{schema.UserMessage("分析半句")}, "推门，走了。", nil)
 			if err != nil {
 				t.Fatal(err)
@@ -139,6 +150,111 @@ func TestHalfAgentExitsAfterToolsAndRepairsLocally(t *testing.T) {
 			if len(result.Halves) != 2 || fake.rounds != wantedRounds || fake.streams != wantedRounds {
 				t.Fatalf("unexpected rounds or coverage: %d, %+v", fake.rounds, result)
 			}
+			if logs.FilterMessage("ai.failed").Len() != 0 {
+				t.Fatalf("normal tool completion was logged as a failure: %+v", logs.FilterMessage("ai.failed").All())
+			}
 		})
+	}
+}
+
+type recoveringHalfModel struct {
+	testing   *testing.T
+	arguments string
+	rounds    int
+	broken    error
+}
+
+func (fake *recoveringHalfModel) WithTools([]*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	return fake, nil
+}
+
+func (fake *recoveringHalfModel) Generate(_ context.Context, messages []*schema.Message, _ ...model.Option) (*schema.Message, error) {
+	fake.rounds++
+	if fake.broken != nil {
+		return nil, fake.broken
+	}
+	if fake.rounds == 1 {
+		return schema.AssistantMessage("", []schema.ToolCall{
+			{ID: "valid", Type: "function", Function: schema.FunctionCall{Name: "submit_half", Arguments: `{"index":0,"desc":["action"]}`}},
+			{ID: "invalid", Type: "function", Function: schema.FunctionCall{Name: "submit_half", Arguments: fake.arguments}},
+		}), nil
+	}
+	if fake.rounds > 2 {
+		return nil, errors.New("unexpected summary round")
+	}
+	found := false
+	for _, message := range messages {
+		if message.Role != schema.Tool || message.ToolCallID != "invalid" {
+			continue
+		}
+		var feedback halfFeedback
+		if err := json.Unmarshal([]byte(message.Content), &feedback); err != nil {
+			fake.testing.Fatal(err)
+		}
+		if feedback.Error == "" || feedback.Done || !slices.Contains(feedback.Remaining, 1) {
+			fake.testing.Fatalf("malformed arguments did not produce actionable feedback: %+v", feedback)
+		}
+		found = true
+	}
+	if !found {
+		fake.testing.Fatal("tool feedback missing from retry context")
+	}
+	return schema.AssistantMessage("", []schema.ToolCall{{ID: "repair", Type: "function", Function: schema.FunctionCall{Name: "submit_half", Arguments: `{"index":1}`}}}), nil
+}
+
+func (fake *recoveringHalfModel) Stream(ctx context.Context, messages []*schema.Message, options ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	message, err := fake.Generate(ctx, messages, options...)
+	if err != nil {
+		return nil, err
+	}
+	var chunks []*schema.Message
+	for index, call := range message.ToolCalls {
+		arguments := call.Function.Arguments
+		call.Index = &index
+		call.Function.Arguments = arguments[:len(arguments)/2]
+		chunks = append(chunks, schema.AssistantMessage("", []schema.ToolCall{call}))
+		chunks = append(chunks, schema.AssistantMessage("", []schema.ToolCall{{Index: &index, Function: schema.FunctionCall{Arguments: arguments[len(arguments)/2:]}}}))
+	}
+	return schema.StreamReaderFromArray(chunks), nil
+}
+
+func TestHalfAgentRecoversMalformedArguments(t *testing.T) {
+	for _, arguments := range []string{`{"index":1,"desc":[`, `{"index":"1"}`, "", `null`, `[]`} {
+		for _, streaming := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/stream=%v", arguments, streaming), func(t *testing.T) {
+				fake := &recoveringHalfModel{testing: t, arguments: arguments}
+				service := &Service{sem: make(chan struct{}, 1)}
+				ctx := context.Background()
+				if streaming {
+					ctx = agent.WithUsageSink(ctx, func(*schema.TokenUsage) {})
+				}
+				var partials int
+				result, err := service.analyzeHalves(ctx, llm.Handle{Model: fake}, []*schema.Message{schema.UserMessage("分析半句")}, "推门，走了。", func(*rawParagraph) { partials++ })
+				if err != nil {
+					t.Fatal(err)
+				}
+				if fake.rounds != 2 || partials != 2 || len(result.Halves) != 2 || result.Halves[0].Desc[0] != "action" {
+					t.Fatalf("successful submissions were lost or invalid ones published: rounds=%d partials=%d result=%+v", fake.rounds, partials, result)
+				}
+			})
+		}
+	}
+}
+
+func TestHalfAgentPreservesTransportFailure(t *testing.T) {
+	wanted := errors.New("connection reset")
+	fake := &recoveringHalfModel{testing: t, broken: wanted}
+	service := &Service{sem: make(chan struct{}, 1)}
+	result, err := service.analyzeHalves(context.Background(), llm.Handle{Model: fake}, []*schema.Message{schema.UserMessage("分析")}, "推门，走了。", nil)
+	if !errors.Is(err, wanted) || result != nil || fake.rounds != 1 {
+		t.Fatalf("transport failure must propagate: result=%+v rounds=%d err=%v", result, fake.rounds, err)
+	}
+}
+
+func TestHalfArgumentsRespectCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := unmarshalHalfSubmission(ctx, `{"index":`); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation was treated as repairable arguments: %v", err)
 	}
 }

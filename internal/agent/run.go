@@ -48,6 +48,7 @@ var errToolsComplete = errors.New("agent tools complete")
 // onText 非空时以流式方式运行，并把助手文本增量回调出来；
 // 夹带工具调用的那一轮文本不会进入返回值，但已经回调出去的增量无法撤回。
 func Run(ctx context.Context, spec Spec, msgs []*schema.Message, onText func(string)) (result string, err error) {
+	ctx = logging.WithCompletionSignal(ctx, errToolsComplete)
 	if sink, ok := ctx.Value(activitySinkKey{}).(func(int)); ok {
 		sink(1)
 		defer sink(-1)

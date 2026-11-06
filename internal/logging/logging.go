@@ -11,6 +11,11 @@ import (
 
 type loggerKey struct{}
 type spanKey struct{}
+type completionSignalKey struct{}
+
+func WithCompletionSignal(ctx context.Context, signal error) context.Context {
+	return context.WithValue(ctx, completionSignalKey{}, signal)
+}
 
 type contextLogger struct {
 	base   *zap.Logger
@@ -62,11 +67,14 @@ func Start(ctx context.Context, operation string, fields ...zap.Field) (context.
 	logger.Info("ai.started")
 	return ctx, func(err error) {
 		fields := []zap.Field{zap.Duration("duration", time.Since(started))}
+		signal, _ := ctx.Value(completionSignalKey{}).(error)
 		switch {
 		case errors.Is(err, context.Canceled):
 			logger.Info("ai.canceled", fields...)
 		case errors.Is(err, context.DeadlineExceeded):
 			logger.Warn("ai.timeout", append(fields, zap.Error(err))...)
+		case signal != nil && errors.Is(err, signal):
+			logger.Info("ai.completed", fields...)
 		case err != nil:
 			logger.Error("ai.failed", append(fields, zap.Error(err))...)
 		default:
