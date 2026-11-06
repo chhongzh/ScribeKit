@@ -31,6 +31,8 @@ test('unanswered requests expire and send cancellation', async () => {
   expect(message.type).toBe('error')
   expect(message.payload).toEqual({ code: 'timeout', message: '模型响应超时，请重试或检查模型服务。' })
   expect(FakeSocket.latest.sent.map((frame) => JSON.parse(frame).type)).toEqual(['analyze.article', 'cancel'])
+  expect(client.tasks.items[0]?.status).toBe('failed')
+  expect(client.tasks.active).toHaveLength(0)
   client.stop()
 })
 
@@ -72,4 +74,72 @@ test('disconnect clears active agents even without request handlers', () => {
   client.stop()
   expect(client.state.active).toBe(0)
   expect(client.state.usedTokens).toBe(8)
+})
+
+test('cancelling one background task settles its caller and ignores late results without affecting another', () => {
+  globalThis.WebSocket = FakeSocket as unknown as typeof WebSocket
+  const client = new WsClient('ws://test')
+  client.start()
+  const first: unknown[] = []
+  const second: unknown[] = []
+  client.send('analyze.article', { articleId: 1 }, (message) => first.push(message), 'first')
+  client.send('scaffold.request', { articleId: 2 }, (message) => second.push(message), 'second')
+  expect(client.tasks.active).toHaveLength(2)
+  client.tasks.active.find((task) => task.id === 'first')!.cancel()
+  expect(first).toEqual([{ id: 'first', type: 'error', payload: { code: 'cancelled', message: '请求已取消' } }])
+  expect(client.tasks.active.map((task) => task.id)).toEqual(['second'])
+  FakeSocket.latest.onmessage?.({ data: JSON.stringify({ id: 'first', type: 'analyze.articleResult', payload: {} }) })
+  expect(first).toHaveLength(1)
+  FakeSocket.latest.onmessage?.({ data: JSON.stringify({ id: 'second', type: 'scaffold.done', payload: {} }) })
+  expect(second).toHaveLength(1)
+  expect(client.tasks.active).toHaveLength(0)
+  expect(client.tasks.items.find((task) => task.id === 'first')?.status).toBe('cancelled')
+  client.stop()
+})
+
+test('disconnect fails all running tasks and clearing history preserves active work', () => {
+  globalThis.WebSocket = FakeSocket as unknown as typeof WebSocket
+  const client = new WsClient('ws://test')
+  client.start()
+  client.send('analyze.text', { articleId: 1 }, () => {}, 'finished')
+  FakeSocket.latest.onmessage?.({ data: JSON.stringify({ id: 'finished', type: 'analyze.textResult', payload: {} }) })
+  client.send('analyze.article', { articleId: 2 }, () => {}, 'running')
+  client.tasks.clearFinished()
+  expect(client.tasks.items.map((task) => task.id)).toEqual(['running'])
+  client.stop()
+  expect(client.tasks.active).toHaveLength(0)
+  expect(client.tasks.items[0]?.status).toBe('failed')
+  expect(client.tasks.items[0]?.error).toContain('连接')
+})
+
+test('closing an article cancels only its tasks and removes stale result actions', () => {
+  globalThis.WebSocket = FakeSocket as unknown as typeof WebSocket
+  const client = new WsClient('ws://test')
+  client.start()
+  client.send('analyze.article', { articleId: 1 }, () => {}, 'article-one')
+  client.send('scaffold.request', { articleId: 1 }, () => {}, 'generation-one')
+  client.send('analyze.text', { articleId: 2 }, () => {}, 'article-two')
+  client.tasks.items.find((task) => task.id === 'article-one')!.open = () => {}
+  client.tasks.cancelArticle(1)
+  expect(client.tasks.active.map((task) => task.id)).toEqual(['article-two'])
+  expect(client.tasks.items.filter((task) => task.articleId === 1).every((task) => task.status === 'cancelled' && !task.open)).toBe(true)
+  expect(FakeSocket.latest.sent.map((message) => JSON.parse(message)).filter((message) => message.type === 'cancel').map((message) => message.payload.targetId).sort()).toEqual(['article-one', 'generation-one'])
+  client.stop()
+})
+
+test('history limits keep the newest finished records and preserve older active tasks', () => {
+  globalThis.WebSocket = FakeSocket as unknown as typeof WebSocket
+  const client = new WsClient('ws://test')
+  client.start()
+  client.send('analyze.article', { articleId: 1 }, () => {}, 'still-running')
+  for (let index = 0; index < 105; index++) {
+    const id = `finished-${index}`
+    client.send('analyze.text', { articleId: 2 }, () => {}, id)
+    FakeSocket.latest.onmessage?.({ data: JSON.stringify({ id, type: 'analyze.textResult', payload: {} }) })
+  }
+  expect(client.tasks.items).toHaveLength(101)
+  expect(client.tasks.items[0]?.id).toBe('finished-104')
+  expect(client.tasks.items.some((task) => task.id === 'finished-4')).toBe(false)
+  expect(client.tasks.active.map((task) => task.id)).toEqual(['still-running'])
+  client.stop()
 })

@@ -61,7 +61,8 @@ const modelText = computed(() => {
     <span v-if="streaming" class="sk-si">Scaffolder 生成中 · Esc 取消</span>
     <v-btn v-if="analyzing" size="small" title="点击取消当前文章的分析" @click="session && analysis.cancel(session.articleId)">Analyzer 分析中 · 取消</v-btn>
     <span v-if="analysisState?.error" class="sk-si text-error" role="alert">{{ analysisState.error }}</span>
-    <span class="sk-si" role="status" :title="usageTitle">后台 Agent {{ wsState.active }} 个 · {{ wsState.missingUsage ? '已知用量' : '已用' }} {{ wsState.usedTokens }} tokens<template v-if="wsState.missingUsage">（部分用量未返回）</template></span>
+    <v-btn size="small" :title="`${usageTitle} 点击打开后台任务。`" @click="ui.openPanel('tasks')">后台 Agent：{{ wsState.active }} 个 · 任务 {{ ws.tasks.active.length }} 个</v-btn>
+    <span class="sk-si" :title="usageTitle">{{ wsState.missingUsage ? '已知用量' : '已用' }} {{ wsState.usedTokens }} tokens<template v-if="wsState.missingUsage">（部分用量未返回）</template></span>
     <v-btn size="small" @click="ui.openPanel('problems')">问题</v-btn>
     <v-btn size="small" @click="ui.openPanel('output')">输出</v-btn>
     <v-menu v-if="sync?.status === 'error' || metadataSave?.status === 'error'" location="top">

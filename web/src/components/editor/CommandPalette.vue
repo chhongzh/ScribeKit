@@ -54,7 +54,7 @@ const items = computed<Item[]>(() => {
     ]),
     { id: 'advice', label: hasSelection.value ? '对选区给建议' : '给本段建议', hint: '只读建议，不生成正文', action: { mode: 'advise', instruction: instruction || '就当前内容给出修改建议', title: '建议' } },
     { id: 'new', label: `在此后新建${kindLabel(newKind.value)}并生成`, action: { mode: 'generate', instruction: instruction || `按上下文写一段${kindLabel(newKind.value)}`, newParagraphKind: newKind.value, title: `新${kindLabel(newKind.value)}` } },
-    { id: 'kind', label: `把本段设为${kindLabel(setKind.value)}`, kind: true },
+    { id: 'kind', label: `把本段设为${kindLabel(setKind.value)}`, kind: true, disabled: props.session.ui.kindLocked ? '类型推断中，取消后台任务后可手动切换' : undefined },
   ]
   const filtered = instruction ? utilities.filter((item) => `${item.label} ${item.hint ?? ''}`.toLowerCase().includes(instruction.toLowerCase())) : utilities
   return [...filtered, ...writing.map((item) => item.action && blocked.value ? { ...item, disabled: blocked.value } : item)]

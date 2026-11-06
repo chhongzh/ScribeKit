@@ -2,12 +2,14 @@
 import { mdiChevronDown, mdiDeleteSweepOutline } from '@mdi/js'
 import { computed, ref, watch } from 'vue'
 import type { Diagnostic } from '../../api/types'
+import { ws } from '../../api/ws'
 import { sliceCp } from '../../core/offsets'
 import { halfAt, segment } from '../../core/textseg'
 import { useEditorStore } from '../../stores/editor'
 import { useLogStore } from '../../stores/log'
 import { useUiStore } from '../../stores/ui'
 import StateBlock from '../StateBlock.vue'
+import BackgroundTasks from './BackgroundTasks.vue'
 
 const ui = useUiStore()
 const editor = useEditorStore()
@@ -88,8 +90,15 @@ watch(
       <v-tab value="output">
         输出
       </v-tab>
+      <v-tab value="tasks">后台任务<span v-if="ws.tasks.active.length" class="sk-count">{{ ws.tasks.active.length }}</span></v-tab>
       </v-tabs>
       <span class="sk-fill" />
+      <v-btn
+        v-if="ui.panelTab === 'tasks'"
+        size="small"
+        :disabled="ws.tasks.items.length === ws.tasks.active.length"
+        @click="ws.tasks.clearFinished()"
+      >清除已结束</v-btn>
       <v-btn
         v-if="ui.panelTab === 'output'"
         :icon="mdiDeleteSweepOutline"
@@ -122,6 +131,7 @@ watch(
         </ul>
       </div>
 
+      <BackgroundTasks v-else-if="ui.panelTab === 'tasks'" key="tasks" />
       <div v-else key="output" ref="outEl" class="sk-bottom-body sk-output" role="tabpanel" aria-label="输出">
         <StateBlock v-if="log.entries.length === 0" state="empty" text="还没有 Agent 请求。分析、生成、取消都会在这里留一行记录。" />
         <ol v-else class="sk-log">

@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { reactive, ref, watch } from 'vue'
 
 export type Activity = 'explorer' | 'materials' | 'guides'
-export type PanelTab = 'problems' | 'output'
+export type PanelTab = 'problems' | 'output' | 'tasks'
 export type InspectorTab = 'suggestions' | 'distribution' | 'structure'
 
 const KEY = 'scribekit.layout'

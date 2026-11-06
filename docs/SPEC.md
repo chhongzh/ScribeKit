@@ -293,6 +293,8 @@ Scaffolder 按文章 genre 加载匹配的指引的“用于 Scaffolder”节，
 - `agent.usage` 是无请求 ID 的全局状态快照：`activeAgents`、`promptTokens`、`completionTokens`、`totalTokens`、`missingUsage`。连接时立即推送，之后每 100 毫秒合并推送有变化的状态；用量在本次服务启动期间累计，重新连接不会重复累计。Analyzer 和 Scaffolder 在接入用量统计时均使用模型 stream；每收到一帧 usage 就计算该轮累计字段的增量，立即记账，不等读取循环或 agent loop 结束，重复帧不重复累计。未返回 usage 的响应单独计数，不估算；服务商仅在末尾返回 usage 时，该轮用量只能在末尾更新。Agent 运行数在实际进入/退出 agent loop 时增减，排队请求不计入。
 - Scaffolder：`adk.ChatModelAgent`，工具：`read_article`（当前文章全部段落）、`list_collection`（同文集其他文章的标题、梗概、开头片段）、`read_article_by_id`、`search_materials`（关键词 bigram 重叠排序，返回片段）、`read_outline`、`read_guide`。流式输出最终文本，通过 `scaffold.delta` 推送。最终回答格式：正文与 `<rationale>...</rationale>` 分开，后端拆分。
 - 每个 WS 请求绑定 context，`cancel` 或连接断开时取消。
+- 前端所有 AI WebSocket 请求共用 `WsClient.tasks` 生命周期，任务种类为段落分析、全文分析、类型推断、建议文本分析和写作生成；任务状态为 `preparing` / `running` / `completed` / `cancelled` / `failed`。状态栏实际 Agent 数仍来自 `agent.usage`，任务数包含保存和连接准备阶段，点击后打开底部“后台任务”。单独取消只终止对应请求并立即通知调用方；迟到的响应不再交付。保留最近 100 条终态记录，清除历史不影响在途任务，关闭文章取消该文章全部任务。
+- 类型推断进入后台后锁定当前文章的手动类型切换，关闭预览或切换文章不取消任务；取消、完成、失败、断线和超时释放锁。结果必须先预览再应用；期间正文或类型变化会使结果失效，类型应用保留单步撤销。
 - 生成前置检查：标题和梗概都非空，否则 `needs_user_input`。`complete` 模式要求光标前有用户文字。
 
 ## 10. 提示词工程（internal/prompt）

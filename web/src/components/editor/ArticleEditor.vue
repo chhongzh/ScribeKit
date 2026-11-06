@@ -2,6 +2,7 @@
 import { mdiConsoleLine, mdiExportVariant } from '@mdi/js'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import type { ParagraphKind } from '../../api/types'
+import { ws } from '../../api/ws'
 import { DESC_KINDS, PARAGRAPH_KINDS, kindLabel } from '../../core/labels'
 import { exportArticle } from '../../editor/exporter'
 import { blockedReason, degradeNote, planShiftEnter, prepare, type ActionInput } from '../../editor/scaffold'
@@ -39,6 +40,7 @@ const organizing = ref(false)
 const organizeError = ref('')
 const organized = ref<{ key: string; index: number; before: ParagraphKind; after: ParagraphKind; role: string }[]>([])
 let organizeSnapshot = s.doc
+let organizeRun = 0
 
 async function openSearch(replace = false) {
   palette.value = null
@@ -49,13 +51,21 @@ async function openSearch(replace = false) {
 }
 
 async function organizeTypes() {
-  organizeOpen.value = true
+  if (organizing.value) return
+  const run = ++organizeRun
+  for (const task of ws.tasks.items.filter((item) => item.articleId === s.articleId && item.kind === 'inference')) task.open = undefined
+  organizeOpen.value = false
   organizing.value = true
   organizeError.value = ''
   organized.value = []
   organizeSnapshot = s.doc
+  ui.openPanel('tasks')
   try {
-    const result = await analysis.inferStructure(s)
+    const result = await analysis.inferStructure(s, () => {
+      editor.activate({ type: 'article', id: s.articleId })
+      organizeOpen.value = true
+    })
+    if (run !== organizeRun) return
     if (!organizeSnapshot.eq(s.doc)) throw new Error('正文或段落类型已变化，请重新整理')
     const roles = new Map(result.paragraphs.map((paragraph) => [paragraph.paragraphId, paragraph]))
     const rows = s.localRows()
@@ -65,10 +75,12 @@ async function organizeTypes() {
       if (!role) throw new Error(`AI 没有返回第 ${index + 1} 段的类型，请重新整理`)
       return { key: row.key, index, before: row.kind, after: role.detectedKind, role: role.role }
     })
+    notify.push('段落类型推断完成，可查看并应用。', { action: { label: '查看结果', run: () => { editor.activate({ type: 'article', id: s.articleId }); organizeOpen.value = true } } })
   } catch (error) {
+    if (run !== organizeRun) return
     organizeError.value = error instanceof Error ? error.message : String(error)
   } finally {
-    organizing.value = false
+    if (run === organizeRun) organizing.value = false
   }
 }
 
@@ -84,9 +96,13 @@ function applyOrganizedTypes() {
 }
 
 function closeOrganize() {
-  if (organizing.value) analysis.cancel(s.articleId)
   organizeOpen.value = false
   s.focus()
+}
+
+function cancelOrganize() {
+  const task = ws.tasks.active.find((item) => item.articleId === s.articleId && item.kind === 'inference')
+  task?.cancel()
 }
 
 function runUtility(action: EditorUtility) {
@@ -400,6 +416,7 @@ const legend = DESC_KINDS.filter((d) => d.colored)
       <v-card min-width="240" class="py-1">
         <template v-if="kindMenu?.mode === 'set'">
           <p class="text-caption sk-muted px-4 pt-1 mb-0">本段类型</p>
+          <p v-if="s.ui.kindLocked" class="text-caption px-4 pt-2" role="status">类型推断中，取消后台任务后可手动切换。</p>
           <v-list density="compact" class="py-0">
             <v-list-item
               v-for="k in PARAGRAPH_KINDS"
@@ -407,6 +424,7 @@ const legend = DESC_KINDS.filter((d) => d.colored)
               :title="k.title"
               :subtitle="k.hint"
               :active="kindMenuNode?.node.attrs.kind === k.value"
+              :disabled="s.ui.kindLocked"
               @click="setKind(k.value)"
             />
           </v-list>
@@ -438,7 +456,7 @@ const legend = DESC_KINDS.filter((d) => d.colored)
       :reason="palette.reason"
       :busy="analyzing"
       @run="runAction"
-      @set-kind="(k) => { s.setKind(s.ui.cursor!.key, k); closePalette(); notify.push(`本段已设为${kindLabel(k)}。`) }"
+      @set-kind="(k) => { if (!s.ui.kindLocked) { s.setKind(s.ui.cursor!.key, k); closePalette(); notify.push(`本段已设为${kindLabel(k)}。`) } }"
       @close="closePalette"
       @utility="runUtility"
     />
@@ -446,7 +464,7 @@ const legend = DESC_KINDS.filter((d) => d.colored)
     <v-dialog :model-value="organizeOpen" max-width="760" scrollable @update:model-value="!$event && closeOrganize()">
       <v-card title="AI 整理段落类型">
         <v-card-text>
-          <div v-if="organizing" class="d-flex align-center ga-3 py-4" role="status"><v-progress-circular indeterminate size="24" />正在结合全文推断每段的类型</div>
+          <p v-if="organizing" class="py-4" role="status">正在后台结合全文推断每段的类型，手动切换类型已锁定。可关闭此窗口继续写作，或取消任务后手动切换。</p>
           <v-alert v-else-if="organizeError" type="error" variant="tonal">{{ organizeError }}</v-alert>
           <template v-else>
             <p class="text-body-2 sk-muted mb-4">检查每段的推断结果，可在应用前调整。只修改类型，正文保持原样。</p>
@@ -457,7 +475,7 @@ const legend = DESC_KINDS.filter((d) => d.colored)
             </v-list>
           </template>
         </v-card-text>
-        <v-card-actions><v-btn :disabled="organizing" @click="organizeTypes">重新推断</v-btn><v-spacer /><v-btn @click="closeOrganize">{{ organizing ? '取消分析' : '取消' }}</v-btn><v-btn variant="flat" color="primary" :disabled="organizing || !!organizeError || !organized.length" @click="applyOrganizedTypes">应用类型</v-btn></v-card-actions>
+        <v-card-actions class="flex-wrap"><v-btn :disabled="organizing" @click="organizeTypes">重新推断</v-btn><v-spacer /><v-btn v-if="organizing" @click="cancelOrganize">取消推断</v-btn><v-btn @click="closeOrganize">{{ organizing ? '继续后台运行' : '关闭' }}</v-btn><v-btn variant="flat" color="primary" :disabled="organizing || !!organizeError || !organized.length" @click="applyOrganizedTypes">应用类型</v-btn></v-card-actions>
       </v-card>
     </v-dialog>
   </div>

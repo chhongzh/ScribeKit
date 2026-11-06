@@ -82,6 +82,7 @@ export const useSuggestionStore = defineStore('suggestions', () => {
     sessions.set(session.articleId, session)
   }
   function detach(articleId: number) {
+    ws.tasks.cancelArticle(articleId)
     sessions.delete(articleId)
   }
 
@@ -151,12 +152,17 @@ export const useSuggestionStore = defineStore('suggestions', () => {
    * anchor 是流式文字在编辑器里显示的位置。
    */
   async function request(session: ArticleSession, draft: ScaffoldDraft, view: StreamView): Promise<boolean> {
+    const requestId = ws.nextId()
+    const task = ws.tasks.start({ id: requestId, articleId: session.articleId, title: view.title || '写作建议生成', kind: 'scaffold', cancel: () => ws.cancel(requestId) })
     try {
       await session.sync.flush()
     } catch {
-      notify.error('有改动没有保存成功，先在编辑器顶部处理保存失败，再交给 Scaffolder。')
+      const error = '有改动没有保存成功，先在编辑器顶部处理保存失败，再交给 Scaffolder。'
+      ws.tasks.finish(requestId, 'failed', error)
+      if (task.status !== 'cancelled') notify.error(error)
       return false
     }
+    if (task.status === 'cancelled') return false
     // flush 之后新段落才有 id；草稿里用的是本地 key，这里换成服务器 id。
     const id = (key: string) => session.sync.idOf(key)
     const missing = [draft.cursor?.key, draft.selection?.key, draft.commandRange?.key].some(
@@ -164,6 +170,7 @@ export const useSuggestionStore = defineStore('suggestions', () => {
     )
     if (missing) {
       notify.error('光标所在的段落还没有保存到后端，稍后再试。')
+      ws.tasks.finish(requestId, 'failed', '光标所在的段落还没有保存到后端，稍后再试。')
       return false
     }
     const full: ScaffoldRequest = {
@@ -181,11 +188,14 @@ export const useSuggestionStore = defineStore('suggestions', () => {
       force: draft.force,
     }
     await ws.whenOpen()
-    return send(session, full, view)
+    if (ws.tasks.active.every((item) => item.id !== requestId) || sessions.get(session.articleId) !== session) {
+      ws.tasks.finish(requestId, 'cancelled')
+      return false
+    }
+    return send(session, full, view, requestId)
   }
 
-  function send(session: ArticleSession, full: ScaffoldRequest, view: StreamView): boolean {
-    const requestId = ws.nextId()
+  function send(session: ArticleSession, full: ScaffoldRequest, view: StreamView, requestId = ws.nextId()): boolean {
     const stream: Stream = {
       requestId,
       articleId: session.articleId,
@@ -233,6 +243,7 @@ export const useSuggestionStore = defineStore('suggestions', () => {
             break
           }
           case 'error': {
+            snapshots.delete(requestId)
             ws.release(requestId)
             dropStream(requestId)
             refreshEditor(session.articleId)
@@ -245,6 +256,7 @@ export const useSuggestionStore = defineStore('suggestions', () => {
       requestId,
     )
     if (!sent) {
+      snapshots.delete(requestId)
       notify.error('WebSocket 未连接，请求没有发出。状态栏会显示重连进度。')
       return false
     }
@@ -283,12 +295,7 @@ export const useSuggestionStore = defineStore('suggestions', () => {
   }
 
   function cancel(requestId: string) {
-    const st = streams.find((x) => x.requestId === requestId)
     ws.cancel(requestId)
-    ws.release(requestId)
-    dropStream(requestId)
-    if (st) refreshEditor(st.articleId)
-    notify.push('已取消生成。')
   }
 
   // ---------- 评审 ----------
@@ -381,20 +388,25 @@ export const useSuggestionStore = defineStore('suggestions', () => {
     const anchorKey =
       (req.cursor && session.sync.keyOf(req.cursor.paragraphId)) ?? snap?.key ?? session.localRows()[0]?.key ?? ''
     delete degraded[s.id]
+    const requestId = ws.nextId()
+    const task = ws.tasks.start({ id: requestId, articleId: session.articleId, title: '仍然生成', kind: 'scaffold', cancel: () => ws.cancel(requestId) })
     try {
       await session.sync.flush()
     } catch {
-      notify.error('有改动没有保存成功，先在编辑器顶部处理保存失败，再交给 Scaffolder。')
+      const error = '有改动没有保存成功，先在编辑器顶部处理保存失败，再交给 Scaffolder。'
+      ws.tasks.finish(requestId, 'failed', error)
+      if (task.status !== 'cancelled') notify.error(error)
       return
     }
     await ws.whenOpen()
+    if (task.status === 'cancelled' || sessions.get(session.articleId) !== session) { ws.tasks.finish(requestId, 'cancelled'); return }
     send(session, { ...req, force: true }, {
       title: '仍然生成',
       anchorKey,
       anchorCp: req.commandRange?.end ?? req.selection?.end ?? req.cursor?.offset ?? 0,
       block: !!req.newParagraphKind,
       paragraphKind: s.paragraphKind,
-    })
+    }, requestId)
   }
 
   // ---------- 编辑器里的显示 ----------

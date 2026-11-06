@@ -95,6 +95,7 @@ export class ArticleSession {
   targets: TargetSpec[] = []
 
   readonly ui = reactive({
+    kindLocked: false,
     layers: { desc: true, marks: true, logic: false, diag: true } as Layers,
     cursor: null as CursorInfo | null,
     charCount: 0,
@@ -222,6 +223,7 @@ export class ArticleSession {
   }
 
   applyKinds(kinds: Map<string, ParagraphKind>): void {
+    if (this.ui.kindLocked) return
     const view = this.view
     if (!view) return
     let transaction = closeHistory(view.state.tr)
@@ -502,6 +504,7 @@ export class ArticleSession {
   // ---------- 段落操作 ----------
 
   setKind(key: string, kind: ParagraphKind): void {
+    if (this.ui.kindLocked) return
     const f = this.find(key)
     const view = this.view
     if (!f || !view) return

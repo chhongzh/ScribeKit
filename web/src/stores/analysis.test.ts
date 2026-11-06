@@ -14,16 +14,20 @@ let session: ArticleSession
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  ws.tasks.items.splice(0)
   replies = new Map()
+  let sequence = 0
+  spyOn(ws, 'nextId').mockImplementation(() => `request-${sequence++}`)
   spyOn(ws, 'whenOpen').mockResolvedValue(true)
   spyOn(ws, 'release').mockImplementation((id) => { replies.delete(id) })
-  send = spyOn(ws, 'send').mockImplementation((_type, _payload, handler) => {
-    const id = `request-${replies.size}`
+  send = spyOn(ws, 'send').mockImplementation((_type, _payload, handler, requestId) => {
+    const id = requestId ?? ws.nextId()
     if (handler) replies.set(id, handler)
     return id
   })
   session = {
     articleId: 1,
+    ui: { kindLocked: false },
     sync: { flush: async () => {}, idOf: () => 10 },
     textOfId: () => '测试段落。',
     localRows: () => [{ key: 'p' }],
@@ -122,4 +126,63 @@ test('a failed partial analysis can be retried with unchanged text', async () =>
   await store.analyzeParagraphs(session, ['p'])
   expect(send).toHaveBeenCalledTimes(2)
   expect(store.st(1).inflight).toBe(1)
+})
+
+test('type inference locks manual changes until completion and retains its result action', async () => {
+  const store = useAnalysisStore()
+  const open = mock(() => {})
+  const pending = store.inferStructure(session, open)
+  expect(session.ui.kindLocked).toBe(true)
+  expect(ws.tasks.active[0]?.title).toBe('段落类型推断')
+  await Bun.sleep(0)
+  const result = { articleId: 1, paragraphs: [], themeWords: [], themeHits: [], structure: { name: '', fit: '', gaps: [] }, notes: [] }
+  replies.get('request-0')!({ id: 'request-0', type: 'analyze.articleResult', payload: result })
+  expect(await pending).toEqual(result)
+  expect(session.ui.kindLocked).toBe(false)
+  expect(store.st(1).articleLoading).toBe(false)
+  expect(ws.tasks.items[0]?.status).toBe('completed')
+  ws.tasks.items[0]?.open?.()
+  expect(open).toHaveBeenCalledTimes(1)
+})
+
+test('cancelling inference during save immediately unlocks and prevents sending after save', async () => {
+  let finishSave!: () => void
+  session.sync.flush = () => new Promise<void>((resolve) => { finishSave = resolve })
+  const store = useAnalysisStore()
+  const pending = store.inferStructure(session)
+  const cancelled = pending.catch((error: Error) => error)
+  ws.tasks.active[0]!.cancel()
+  expect(session.ui.kindLocked).toBe(false)
+  expect(store.st(1).articleLoading).toBe(false)
+  expect((await cancelled as Error).message).toBe('类型推断已取消')
+  finishSave()
+  await Bun.sleep(0)
+  expect(send).not.toHaveBeenCalled()
+  expect(ws.tasks.active).toHaveLength(0)
+})
+
+test('an old cancelled inference cannot unlock a replacement task', async () => {
+  const store = useAnalysisStore()
+  const first = store.inferStructure(session)
+  const cancelled = first.catch((error: Error) => error)
+  ws.tasks.active[0]!.cancel()
+  const second = store.inferStructure(session)
+  expect((await cancelled as Error).message).toBe('类型推断已取消')
+  expect(session.ui.kindLocked).toBe(true)
+  await Bun.sleep(0)
+  replies.get('request-1')!({ id: 'request-1', type: 'analyze.articleResult', payload: { articleId: 1, paragraphs: [] } })
+  await second
+  expect(session.ui.kindLocked).toBe(false)
+})
+
+test('inference timeout releases the type lock and allows retry', async () => {
+  const store = useAnalysisStore()
+  const pending = store.inferStructure(session)
+  const failed = pending.catch((error: Error) => error)
+  await Bun.sleep(0)
+  replies.get('request-0')!({ id: 'request-0', type: 'error', payload: { code: 'timeout' } })
+  expect((await failed as Error).message).toContain('超时')
+  expect(session.ui.kindLocked).toBe(false)
+  expect(ws.tasks.items[0]?.status).toBe('failed')
+  expect(replies.size).toBe(0)
 })

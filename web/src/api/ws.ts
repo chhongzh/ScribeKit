@@ -1,4 +1,7 @@
 import { reactive } from 'vue'
+import { wsErrorText } from '../core/labels'
+import { BackgroundTasks } from './tasks'
+import type { TaskKind } from './tasks'
 
 // SPEC §5：单连接、JSON 文本帧、信封 {id, type, payload}。
 // 断线指数退避重连；请求按 id 路由到发起者，服务端无 id 的推送走全局监听。
@@ -17,8 +20,15 @@ type LogFn = (dir: 'out' | 'in' | 'sys', text: string, msg?: Envelope) => void
 const MIN_DELAY = 500
 const MAX_DELAY = 15000
 const PING_EVERY = 25000
+const TASK_TYPES: Record<string, { title: string; kind: TaskKind }> = {
+  'analyze.paragraphs': { title: '段落分析', kind: 'paragraphs' },
+  'analyze.article': { title: '全文分析', kind: 'article' },
+  'analyze.text': { title: '建议文本分析', kind: 'text' },
+  'scaffold.request': { title: '写作建议生成', kind: 'scaffold' },
+}
 
 export class WsClient {
+  readonly tasks = new BackgroundTasks()
   readonly state = reactive({ status: 'closed' as WsStatus, retryIn: 0, attempts: 0, lastError: '', active: 0, usedTokens: 0, promptTokens: 0, completionTokens: 0, missingUsage: 0 })
   private sock: WebSocket | null = null
   private seq = 0
@@ -89,8 +99,7 @@ export class WsClient {
         return
       }
       if (msg.type !== 'pong' && msg.type !== 'scaffold.delta' && msg.type !== 'agent.usage') this.log('in', `${msg.type}${msg.id ? ` #${msg.id}` : ''}`, msg)
-      const h = msg.id ? this.handlers.get(msg.id) : undefined
-      if (h) h(msg)
+      if (msg.id) this.deliver(msg)
       if (msg.type === 'agent.usage') {
         const usage = msg.payload as { activeAgents: number; totalTokens: number; promptTokens: number; completionTokens: number; missingUsage: number }
         this.state.active = usage.activeAgents
@@ -108,8 +117,8 @@ export class WsClient {
       this.state.status = 'closed'
       this.state.active = 0
       // 断开时所有进行中的请求都失败，发起者按 error 处理。
-      for (const [id, h] of [...this.handlers]) {
-        h({ id, type: 'error', payload: { code: 'disconnected', message: '连接已断开' } })
+      for (const id of [...this.handlers.keys()]) {
+        this.deliver({ id, type: 'error', payload: { code: 'disconnected', message: '连接已断开' } })
       }
       this.handlers.clear()
 	  for (const timer of this.deadlines.values()) clearTimeout(timer)
@@ -149,19 +158,26 @@ export class WsClient {
 
   /** 发送请求。未连接时返回 null，调用方负责提示。 */
   send(type: string, payload: unknown, handler?: Handler, id = this.nextId(), timeout = 190000): string | null {
-    if (!this.sock || this.sock.readyState !== WebSocket.OPEN) return null
+    if (!this.sock || this.sock.readyState !== WebSocket.OPEN) {
+      this.tasks.finish(id, 'failed', 'WebSocket 未连接，请重连后重试。')
+      return null
+    }
+    if (TASK_TYPES[type]) {
+      this.tasks.start({ id, articleId: (payload as { articleId: number }).articleId, ...TASK_TYPES[type], cancel: () => this.cancel(id) })
+      this.tasks.running(id)
+    }
     if (handler) {
       this.handlers.set(id, handler)
       this.deadlines.set(id, setTimeout(() => {
-        this.release(id)
-        this.cancel(id)
-        handler({ id, type: 'error', payload: { code: 'timeout', message: '模型响应超时，请重试或检查模型服务。' } })
+        this.send('cancel', { targetId: id })
+        this.deliver({ id, type: 'error', payload: { code: 'timeout', message: '模型响应超时，请重试或检查模型服务。' } })
       }, timeout))
     }
     try {
       this.sock.send(JSON.stringify({ id, type, payload }))
     } catch {
       this.release(id)
+      this.tasks.finish(id, 'failed', '请求发送失败，请重连后重试。')
       return null
     }
     if (type !== 'ping') this.log('out', `${type} #${id}`, { id, type, payload })
@@ -192,7 +208,21 @@ export class WsClient {
   }
 
   cancel(targetId: string): void {
-    this.send('cancel', { targetId })
+    if (this.handlers.has(targetId)) this.send('cancel', { targetId })
+    this.deliver({ id: targetId, type: 'error', payload: { code: 'cancelled', message: '请求已取消' } })
+  }
+
+  private deliver(message: Envelope): void {
+    const handler = this.handlers.get(message.id)
+    if (message.type === 'error') {
+      const payload = message.payload as { code?: string; message?: string }
+      this.tasks.finish(message.id, payload.code === 'cancelled' ? 'cancelled' : 'failed', wsErrorText(payload.code ?? 'internal', payload.message))
+      this.release(message.id)
+    } else if (['analyze.done', 'analyze.articleResult', 'analyze.textResult', 'scaffold.done'].includes(message.type)) {
+      this.tasks.finish(message.id, 'completed')
+      this.release(message.id)
+    }
+    handler?.(message)
   }
 
   on(type: string, fn: Handler): () => void {
