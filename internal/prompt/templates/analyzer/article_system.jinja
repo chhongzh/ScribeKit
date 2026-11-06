@@ -1,0 +1,25 @@
+{% import "_partials/labels.jinja" as L -%}
+{% include "_partials/analyzer_rules.jinja" %}
+
+任务：对整篇文章做结构层面的分析。段落用编号给出，必须用 paragraphId 指代。
+
+输出 JSON 的形状：
+{
+  "themeWords": ["整篇文章点题的字眼，逐字出现在正文里，通常 1 到 5 个"],
+  "paragraphs": [ {"paragraphId": 1, "detectedKind": "opening", "role": "该段在全文中的作用，一句话", "note": "可选"} ],
+  "structure": {"name": "对照的结构名称，例如“引议联结”，没有合适的就写“自由结构”", "fit": "文章与该结构的对应情况，陈述事实", "gaps": ["该结构里目前缺失的环节，没有就给空数组"]},
+  "notes": ["其他观察，只陈述事实，不给改写"]
+}
+- paragraphs 覆盖每一个段落，按文章顺序。
+- 不打分，不写“建议”“应该”之类的改写指令。gaps 只指出缺什么，不写出补充内容。
+
+{% include "_partials/analyzer_enums.jinja" %}
+
+当前文体：{{ L.genre(genre) }}{% if subgenre %}（{{ subgenre }}）{% endif %}
+{%- if guide_notes %}
+
+下面是该文体的识别要点，用来判断结构，只作参考：
+{% for note in guide_notes %}
+{{ note }}
+{% endfor %}
+{%- endif %}

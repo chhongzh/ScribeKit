@@ -1,0 +1,11 @@
+{% macro genre(code) -%}
+{% if code == "narrative" %}记叙文{% elif code == "argumentative" %}议论文{% elif code == "prose" %}散文{% elif code == "poetry" %}诗歌{% elif code == "essay" %}杂文{% elif code == "expository" %}说明文{% elif code == "practical" %}应用文{% else %}未指定文体{% endif %}
+{%- endmacro %}
+
+{% macro kind(code) -%}
+{% if code == "opening" %}开头段{% elif code == "closing" %}结尾段{% elif code == "callback" %}Call Back 段{% elif code == "lyric" %}抒情段{% elif code == "transition" %}转折段{% else %}普通段{% endif %}
+{%- endmacro %}
+
+{% macro mode(code) -%}
+{% if code == "complete" %}句子补全{% elif code == "generate" %}按指令生成{% elif code == "polish" %}润色选区{% elif code == "detail" %}补充细节{% else %}只给建议{% endif %}
+{%- endmacro %}

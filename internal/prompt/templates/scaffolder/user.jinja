@@ -1,0 +1,42 @@
+{% import "_partials/labels.jinja" as L -%}
+文章标题：{{ title }}
+文体：{{ L.genre(genre) }}{% if subgenre %}（{{ subgenre }}）{% endif %}
+梗概：{{ synopsis }}
+{% if collection_name -%}
+所属文集：{{ collection_name }}
+{% endif -%}
+{% if outline -%}
+文集总纲：
+{{ outline }}
+{% endif %}
+{% if prev_paragraph -%}
+上一段：
+{{ prev_paragraph }}
+
+{% endif -%}
+{% if has_cursor -%}
+当前段落（{{ L.kind(paragraph_kind) }}），光标前：
+「{{ before }}」
+光标后：
+「{{ after }}」
+{% elif paragraph_text -%}
+当前段落（{{ L.kind(paragraph_kind) }}）：
+「{{ paragraph_text }}」
+{% endif -%}
+{% if selection -%}
+选区：
+「{{ selection }}」
+{% endif -%}
+{% if next_paragraph %}
+下一段：
+{{ next_paragraph }}
+{% endif %}
+{% if new_paragraph -%}
+结果将作为新的{{ L.kind(new_kind) }}插在当前段落之后。
+{% endif -%}
+{% if instruction -%}
+用户指令：{{ instruction }}
+{% else -%}
+用户没有给出具体指令，请根据梗概和已有正文判断。
+{% endif %}
+请开始。

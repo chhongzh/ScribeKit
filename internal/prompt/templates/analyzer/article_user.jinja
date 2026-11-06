@@ -1,0 +1,10 @@
+{% import "_partials/labels.jinja" as L -%}
+文章标题：{{ article_title }}
+{% if synopsis %}梗概：{{ synopsis }}
+{% endif %}
+正文：
+{% for p in paragraphs %}
+【段落 {{ p.id }}，用户标注类型：{{ L.kind(p.kind) }}】
+{{ p.text }}
+{% endfor %}
+请只输出 JSON。

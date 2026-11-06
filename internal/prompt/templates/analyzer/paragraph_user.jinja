@@ -1,0 +1,9 @@
+{% if article_title %}文章标题：{{ article_title }}
+{% endif -%}
+{% if synopsis %}梗概：{{ synopsis }}
+{% endif -%}
+下面是需要分析的段落，已切分为半句（方括号内是编号）：
+{% for h in halves %}
+[{{ h.index }}] {{ h.text }}
+{% endfor %}
+请只输出 JSON。
