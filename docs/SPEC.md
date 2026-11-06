@@ -61,7 +61,10 @@ ID 一律为 int（ent 默认自增），时间为 RFC3339。JSON 字段名用 c
 5. 片段包含其结尾标点。片段开头的空白（空格、全角空格、制表符）不计入片段，被跳过。
 6. 句子 = 若干连续半句，以句末符号结尾的半句结束一个句子；文本末尾没有句末符号时，剩余部分自成最后一个句子。
 7. 全为空白或纯标点的片段丢弃（纯标点片段并入前一个片段的结尾）。
-8. 半句 index 在整段内从 0 连续编号，句子 index 同理。
+8. 段内换行 `\n`（诗歌分行）结束当前半句，换行符本身不计入任何片段；连续空行无额外含义。换行不结束句子，除非前面已有句末符号。
+9. 半句 index 在整段内从 0 连续编号，句子 index 同理。
+
+补充测试向量：`山那边\n是海，\n是海` → `山那边|是海，|是海`，一个句子。
 
 输出结构：
 
@@ -231,7 +234,7 @@ interface ParagraphAnalysis {
   textHash: string            // sha256(text) 前 16 位十六进制，前端用来丢弃过期结果
   segmentation: Segmentation  // §3 的结构
   halves: { index: number; desc: DescKind[]; rhetoric: Rhetoric[] }[]
-  relations: { from: number; to: number; kind: RelationKind; note?: string }[]  // 半句 index
+  relations: { from: number; to: number; kind: RelationKind; note?: string }[]  // 半句 index。from 为语序靠前的半句，kind 描述 to 相对 from 的关系（倒装时对调）。枚举外的细分写进 note：选择→parallel，假设→condition，说明文半句→narration，设问→rhetorical_question
   marks: { start: number; end: number; kind: MarkKind; note?: string; ref?: { start: number; end: number } }[]
   diagnostics: { start: number; end: number; severity: 'hint' | 'info' | 'warning'; message: string }[]
   model: string
