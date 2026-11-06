@@ -4,7 +4,6 @@ package scaffolder
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"slices"
 	"strings"
 
@@ -12,9 +11,11 @@ import (
 	"github.com/chhongzh/scribekit/internal/apperr"
 	"github.com/chhongzh/scribekit/internal/guide"
 	"github.com/chhongzh/scribekit/internal/llm"
+	"github.com/chhongzh/scribekit/internal/logging"
 	"github.com/chhongzh/scribekit/internal/prompt"
 	"github.com/chhongzh/scribekit/internal/store"
 	"github.com/chhongzh/scribekit/internal/textseg"
+	"go.uber.org/zap"
 )
 
 const (
@@ -322,7 +323,9 @@ func tailRunes(s string, n int) string {
 }
 
 // Run 完成一次生成请求并把结果作为 pending 建议入库。取消或失败时不留下任何半成品。
-func (s *Service) Run(ctx context.Context, requestID string, req Request, ev Events) (store.Suggestion, error) {
+func (s *Service) Run(ctx context.Context, requestID string, req Request, ev Events) (result store.Suggestion, err error) {
+	ctx, finish := logging.Start(ctx, "scaffolder.run", zap.String("request_id", requestID), zap.Int("article_id", req.ArticleID), zap.String("requested_mode", req.Mode))
+	defer func() { finish(err) }()
 	h, err := s.models.For(ctx, llm.Scaffolder)
 	if err != nil {
 		return store.Suggestion{}, err
@@ -331,6 +334,7 @@ func (s *Service) Run(ctx context.Context, requestID string, req Request, ev Eve
 	if err != nil {
 		return store.Suggestion{}, err
 	}
+	logging.From(ctx).Info("scaffolder.plan.ready", zap.String("mode", pl.mode), zap.String("op", pl.op), zap.String("paragraph_kind", pl.targetKind), zap.Bool("downgraded", pl.mode != req.Mode))
 	var outline, collectionName string
 	if art.CollectionID != nil {
 		c, err := s.store.GetCollection(ctx, *art.CollectionID)
@@ -349,6 +353,7 @@ func (s *Service) Run(ctx context.Context, requestID string, req Request, ev Eve
 	if err != nil {
 		return store.Suggestion{}, err
 	}
+	logging.From(ctx).Info("scaffolder.tools.ready", zap.Int("tool_count", len(tools)))
 
 	paragraphKind := pl.targetKind
 	if pl.op == "insert_paragraph" && req.NewParagraphKind != nil {
@@ -363,9 +368,13 @@ func (s *Service) Run(ctx context.Context, requestID string, req Request, ev Eve
 	}
 	discard := func() {
 		if derr := s.store.DeleteSuggestion(context.WithoutCancel(ctx), sg.ID); derr != nil {
-			slog.Warn("discard unfinished suggestion", "id", sg.ID, "err", derr)
+			logging.From(ctx).Warn("scaffolder.suggestion.discard.failed", zap.Int("suggestion_id", sg.ID), zap.Error(derr))
+		} else {
+			logging.From(ctx).Info("scaffolder.suggestion.discarded", zap.Int("suggestion_id", sg.ID))
 		}
 	}
+	ctx = logging.With(ctx, zap.Int("suggestion_id", sg.ID))
+	logging.From(ctx).Info("scaffolder.suggestion.created")
 	if ev.Started != nil {
 		ev.Started(sg.ID)
 	}
@@ -412,6 +421,7 @@ func (s *Service) Run(ctx context.Context, requestID string, req Request, ev Eve
 		discard()
 		return store.Suggestion{}, err
 	}
+	logging.From(ctx).Info("scaffolder.suggestion.finished", zap.Int("output_bytes", len(text)), zap.Int("rationale_bytes", len(rationale)))
 	return done, nil
 }
 

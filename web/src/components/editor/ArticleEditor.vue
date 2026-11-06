@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { mdiConsoleLine, mdiExportVariant, mdiPaletteSwatchOutline } from '@mdi/js'
+import { mdiConsoleLine, mdiExportVariant } from '@mdi/js'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import type { ParagraphKind } from '../../api/types'
 import { DESC_KINDS, PARAGRAPH_KINDS, kindLabel } from '../../core/labels'
@@ -9,13 +9,15 @@ import type { ArticleSession } from '../../editor/session'
 import { useAnalysisStore } from '../../stores/analysis'
 import { useEditorStore } from '../../stores/editor'
 import { useNotifyStore } from '../../stores/notify'
-import { useSettingsStore } from '../../stores/settings'
 import { useSuggestionStore } from '../../stores/suggestions'
 import { useUiStore } from '../../stores/ui'
 import ArticleHeader from './ArticleHeader.vue'
-import CommandPalette from './CommandPalette.vue'
+import CommandPalette, { type EditorUtility } from './CommandPalette.vue'
 import HoverCard from './HoverCard.vue'
 import RelationOverlay from './RelationOverlay.vue'
+import ContextMenu, { type ContextAction } from '../ContextMenu.vue'
+import SearchPanel from './SearchPanel.vue'
+import { toggleFullscreen } from '../../core/fullscreen'
 
 const props = defineProps<{ session: ArticleSession; active: boolean }>()
 
@@ -24,12 +26,117 @@ const sg = useSuggestionStore()
 const ui = useUiStore()
 const editor = useEditorStore()
 const notify = useNotifyStore()
-const settings = useSettingsStore()
 
 const host = ref<HTMLElement | null>(null)
 const paper = ref<HTMLElement | null>(null)
 const s = props.session
 const layers = s.ui.layers
+const searchOpen = ref(false)
+const searchReplace = ref(false)
+const searchPanel = ref<InstanceType<typeof SearchPanel> | null>(null)
+const organizeOpen = ref(false)
+const organizing = ref(false)
+const organizeError = ref('')
+const organized = ref<{ key: string; index: number; before: ParagraphKind; after: ParagraphKind; role: string }[]>([])
+let organizeSnapshot = s.doc
+
+async function openSearch(replace = false) {
+  palette.value = null
+  searchReplace.value = replace
+  searchOpen.value = true
+  await nextTick()
+  await searchPanel.value?.focus()
+}
+
+async function organizeTypes() {
+  organizeOpen.value = true
+  organizing.value = true
+  organizeError.value = ''
+  organized.value = []
+  organizeSnapshot = s.doc
+  try {
+    const result = await analysis.inferStructure(s)
+    if (!organizeSnapshot.eq(s.doc)) throw new Error('正文或段落类型已变化，请重新整理')
+    const roles = new Map(result.paragraphs.map((paragraph) => [paragraph.paragraphId, paragraph]))
+    const rows = s.localRows()
+    organized.value = rows.map((row, index) => {
+      const id = s.sync.idOf(row.key)
+      const role = id === null ? undefined : roles.get(id)
+      if (!role) throw new Error(`AI 没有返回第 ${index + 1} 段的类型，请重新整理`)
+      return { key: row.key, index, before: row.kind, after: role.detectedKind, role: role.role }
+    })
+  } catch (error) {
+    organizeError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    organizing.value = false
+  }
+}
+
+function applyOrganizedTypes() {
+  if (!organizeSnapshot.eq(s.doc)) {
+    organizeError.value = '正文或段落类型已变化，请重新整理'
+    return
+  }
+  s.applyKinds(new Map(organized.value.map((row) => [row.key, row.after])))
+  organizeOpen.value = false
+  notify.push('已统一整理段落类型。Ctrl+Z 可撤销。')
+  s.focus()
+}
+
+function closeOrganize() {
+  if (organizing.value) analysis.cancel(s.articleId)
+  organizeOpen.value = false
+  s.focus()
+}
+
+function runUtility(action: EditorUtility) {
+  palette.value = null
+  switch (action) {
+    case 'find': void openSearch(); break
+    case 'replace': void openSearch(true); break
+    case 'fullscreen': void toggleFullscreen().catch(() => notify.error('浏览器没有进入全屏，请使用浏览器的全屏菜单。')); break
+    case 'organize': void organizeTypes(); break
+    case 'analyze-current': analyzeCurrent(); s.focus(); break
+    case 'analyze-all': analyzeAll(); s.focus(); break
+    case 'settings': editor.openSettings(); break
+  }
+}
+const contextOpen = ref(false)
+const contextAt = ref<[number, number]>([0, 0])
+
+async function clipboard(action: 'copy' | 'cut' | 'paste') {
+  try {
+    if (action === 'paste') await s.pasteText()
+    else await s.copySelection(action === 'cut')
+  } catch (error) {
+    notify.error(`剪贴板操作失败：${error instanceof Error ? error.message : String(error)}。可使用 Ctrl+C / Ctrl+X / Ctrl+V。`)
+  }
+}
+
+const contextActions = computed<ContextAction[]>(() => {
+  void s.ui.revision
+  const cursor = s.ui.cursor
+  return [
+    { title: '撤销', hint: 'Ctrl+Z', disabled: !s.canUndo(), run: () => s.undo() },
+    { title: '重做', hint: 'Ctrl+Y', disabled: !s.canRedo(), run: () => s.redo() },
+    { title: '剪切', hint: 'Ctrl+X', disabled: !s.hasSelection, run: () => { void clipboard('cut') } },
+    { title: '复制', hint: 'Ctrl+C', disabled: !s.hasSelection, run: () => { void clipboard('copy') } },
+    { title: '粘贴', hint: 'Ctrl+V', run: () => { void clipboard('paste') } },
+    { title: '全选正文', hint: 'Ctrl+A', run: () => s.selectAll() },
+    { title: '命令面板', hint: 'Ctrl+K', run: () => openPalette() },
+    { title: '分析本段', disabled: analyzing.value || !cursor, run: analyzeCurrent },
+    { title: '本段类型 / 新建段落', hint: 'Alt+T', disabled: !cursor, run: () => {
+      if (cursor) kindMenu.value = { key: cursor.key, target: contextAt.value, mode: 'set' }
+    } },
+    { title: '上移一段', disabled: !cursor || cursor.index === 0, run: () => { s.moveCurrent(-1) } },
+    { title: '下移一段', disabled: !cursor || cursor.index === s.doc.childCount - 1, run: () => { s.moveCurrent(1) } },
+    { title: '删除本段', danger: true, disabled: !cursor, run: () => { if (cursor) s.deleteParagraph(cursor.key) } },
+  ]
+})
+
+function restoreContextFocus() {
+  if (!palette.value && !kindMenu.value) s.focus()
+}
 
 // ---------- 段落类型菜单 ----------
 const kindMenu = ref<{ key: string; target: HTMLElement | [number, number]; mode: 'set' | 'new' } | null>(null)
@@ -139,6 +246,11 @@ onMounted(() => {
       return sg.cancelLatest(s.articleId)
     },
     onTextEdited: (keys) => analysis.schedule(s, keys),
+    onContextMenu: (at) => {
+      contextAt.value = at
+      contextOpen.value = true
+    },
+    onSearch: (replace) => { void openSearch(replace) },
   })
   sg.refreshEditor(s.articleId)
 })
@@ -149,6 +261,11 @@ watch(
     if (v) {
       await nextTick()
       s.refresh()
+    } else {
+      contextOpen.value = false
+      palette.value = null
+      searchOpen.value = false
+      kindMenu.value = null
     }
   },
 )
@@ -160,13 +277,7 @@ watch(
 
 // ---------- 工具条 ----------
 const st = computed(() => analysis.st(s.articleId))
-const analyzing = computed(() => st.value.inflight > 0 || st.value.articleLoading)
-const syncState = s.sync.state
-const stale = computed(() => {
-  void s.ui.revision
-  const c = s.ui.cursor
-  return c ? s.hasStaleAnalysis(c.key) : false
-})
+const analyzing = computed(() => st.value.preparing > 0 || st.value.inflight > 0 || st.value.articleLoading)
 
 function analyzeCurrent() {
   const c = s.ui.cursor
@@ -182,21 +293,12 @@ async function doExport(format: 'md' | 'docx') {
   try {
     await exportArticle(s.articleId, format, s)
   } catch {
-    notify.error('有改动没有保存成功，导出会缺内容。先处理上方的保存失败。')
-  }
-}
-
-async function reloadFromServer() {
-  try {
-    await editor.reloadArticle(s.articleId)
-    notify.push('已按服务器上的版本重新载入。')
-  } catch (e) {
-    notify.error(`重新载入失败：${e instanceof Error ? e.message : String(e)}`)
+    notify.error('有改动没有保存成功，导出会缺内容。先处理状态栏中的保存失败。')
   }
 }
 
 const layerButtons = [
-  { key: 'desc', label: '描写', hint: '半句描写类型底色' },
+  { key: 'desc', label: '描写', hint: '半句描写类型高亮' },
   { key: 'marks', label: '标记', hint: '点题方框、关键词、重复、代词、呼应、论点论据论证' },
   { key: 'logic', label: '逻辑', hint: '显示全部半句关系；关闭时只显示悬停半句的关系' },
   { key: 'diag', label: '诊断', hint: '点状下划线，与底部“问题”面板对应' },
@@ -211,37 +313,19 @@ const legend = DESC_KINDS.filter((d) => d.colored)
       <span class="sk-tb-group" role="group" aria-label="分析图层">
         <v-tooltip v-for="b in layerButtons" :key="b.key" :text="b.hint">
           <template #activator="{ props: tp }">
-            <button
+            <v-btn
               v-bind="tp"
               type="button"
-              class="sk-layer"
-              :class="{ 'sk-layer-on': layers[b.key] }"
+              size="small"
+              :variant="layers[b.key] ? 'tonal' : 'text'"
+              :color="layers[b.key] ? 'primary' : undefined"
               :aria-pressed="layers[b.key]"
               @click="layers[b.key] = !layers[b.key]"
             >
               {{ b.label }}
-            </button>
+            </v-btn>
           </template>
         </v-tooltip>
-        <v-menu location="bottom start">
-          <template #activator="{ props: mp }">
-            <v-btn v-bind="mp" :icon="mdiPaletteSwatchOutline" size="small" density="comfortable" aria-label="描写颜色图例" title="图例" />
-          </template>
-          <v-card class="pa-3 sk-legend" min-width="220">
-            <p class="text-caption sk-muted mb-2">描写类型底色</p>
-            <div v-for="d in legend" :key="d.value" class="sk-legend-row">
-              <span class="sk-swatch" :class="`sk-desc-${d.value}`">样字</span>{{ d.title }}
-            </div>
-            <p class="text-caption sk-muted mt-3 mb-2">标记</p>
-            <div class="sk-legend-row"><span class="sk-swatch sk-mk-theme">点题</span>方框：点题字眼</div>
-            <div class="sk-legend-row"><span class="sk-swatch sk-mk-keyword">关键</span>实线：关键词</div>
-            <div class="sk-legend-row"><span class="sk-swatch sk-mk-repeat">重复</span>波浪线：重复用词</div>
-            <div class="sk-legend-row"><span class="sk-swatch sk-mk-pronoun">他</span>虚线：代词，悬停看指代</div>
-            <div class="sk-legend-row"><span class="sk-swatch sk-mk-callback">呼应</span>双线：前后呼应</div>
-            <div class="sk-legend-row"><span class="sk-swatch sk-diag sk-diag-warning">诊断</span>点线：诊断</div>
-            <div class="sk-legend-row"><span class="sk-swatch sk-cmd">[指令]</span>给 Scaffolder 的指令</div>
-          </v-card>
-        </v-menu>
       </span>
 
       <span class="sk-tb-sep" />
@@ -249,15 +333,6 @@ const legend = DESC_KINDS.filter((d) => d.colored)
       <span class="sk-tb-group">
         <v-btn size="small" :disabled="analyzing" @click="analyzeCurrent">分析本段</v-btn>
         <v-btn size="small" :disabled="analyzing" @click="analyzeAll">分析全文</v-btn>
-        <span class="sk-tb-status" role="status">
-          <template v-if="analyzing">Analyzer 分析中</template>
-          <template v-else-if="st.errorCode === 'model_not_configured'">
-            <span class="text-error">还没配置模型，分析暂停。</span>
-            <button type="button" class="sk-plain text-decoration-underline" @click="editor.openSettings()">打开设置</button>
-          </template>
-          <span v-else-if="st.error" class="text-error">{{ st.error }}</span>
-          <template v-else-if="stale">本段改动后旧分析已失效{{ settings.settings?.autoAnalyze ? '，停笔 1.2 秒后重新分析' : '' }}</template>
-        </span>
       </span>
 
       <span class="sk-tb-fill" />
@@ -274,21 +349,44 @@ const legend = DESC_KINDS.filter((d) => d.colored)
       </v-menu>
     </div>
 
-    <div v-if="syncState.status === 'error'" class="sk-sync-error" role="alert">
-      <span>没能{{ syncState.failedOp }}：{{ syncState.error }}。之后的改动先留在本地，没有写入后端。</span>
-      <v-btn size="small" variant="outlined" @click="s.sync.retry()">重试</v-btn>
-      <v-btn size="small" @click="reloadFromServer">放弃本地改动，按服务器版本重新载入</v-btn>
-    </div>
-
     <div class="sk-scroll">
-      <div ref="paper" class="sk-paper" :class="{ 'sk-genre-poetry': s.meta.genre === 'poetry' }">
+      <SearchPanel v-if="searchOpen && active" ref="searchPanel" v-model:replace="searchReplace" :session="s" @close="searchOpen = false; s.focus()" />
+      <div ref="paper" class="sk-paper" :style="{ fontSize: `${18 * ui.editorZoom / 100}px`, '--sk-paper-width': `${ui.layout.editorWidth}px` }" :class="{ 'sk-genre-poetry': s.meta.genre === 'poetry' }">
         <ArticleHeader :session="s" @enter-body="s.focus()" />
         <div ref="host" class="sk-host" />
         <RelationOverlay :session="s" :paper="paper" />
       </div>
     </div>
 
-    <HoverCard v-if="active" :session="s" />
+    <footer class="sk-editor-footer bg-sk-panel" aria-label="编辑器图例与排版">
+      <div class="sk-footer-legend" :class="{ 'sk-muted': !layers.desc }" aria-label="描写类型图例">
+        <span class="sk-muted">图例</span>
+        <span v-for="item in legend" :key="item.value" :class="`sk-desc-${item.value}`">{{ item.title }}</span>
+      </div>
+      <v-menu location="top start">
+        <template #activator="{ props: menuProps }"><v-btn v-bind="menuProps" size="small">标记图例</v-btn></template>
+        <v-card class="pa-3" max-width="320">
+          <div class="sk-legend-row"><span class="sk-swatch sk-mk-theme">点题</span>方框：点题字眼</div>
+          <div class="sk-legend-row"><span class="sk-swatch sk-mk-keyword">关键</span>实线：关键词</div>
+          <div class="sk-legend-row"><span class="sk-swatch sk-mk-repeat">重复</span>波浪线：重复用词</div>
+          <div class="sk-legend-row"><span class="sk-swatch sk-mk-pronoun">他</span>虚线：代词</div>
+          <div class="sk-legend-row"><span class="sk-swatch sk-mk-callback">呼应</span>双线：前后呼应</div>
+          <div class="sk-legend-row"><span class="sk-swatch sk-diag sk-diag-warning">诊断</span>点线：诊断</div>
+          <div class="sk-legend-row"><span class="sk-swatch sk-cmd">[指令]</span>给 Scaffolder 的指令</div>
+        </v-card>
+      </v-menu>
+      <v-menu location="top end" :close-on-content-click="false">
+        <template #activator="{ props: menuProps }"><v-btn v-bind="menuProps" size="small">左右留白</v-btn></template>
+        <v-card class="pa-4" width="300" max-width="calc(100vw - 16px)">
+          <v-slider v-model="ui.layout.editorWidth" label="稿面宽度" :min="560" :max="1600" :step="40" thumb-label="always" hide-details class="mt-5" />
+          <p class="text-caption sk-muted mt-2">稿面始终居中；加宽会同时缩小两侧留白。窄屏自动适配。</p>
+          <v-btn size="small" @click="ui.layout.editorWidth = 880">恢复默认</v-btn>
+        </v-card>
+      </v-menu>
+    </footer>
+
+    <ContextMenu v-model="contextOpen" :at="contextAt" label="正文操作" :actions="contextActions" @closed="restoreContextFocus" />
+    <HoverCard v-if="active" :session="s" :disabled="!!palette || contextOpen || !!kindMenu || organizeOpen" />
 
     <v-menu
       v-model="kindMenuOpen"
@@ -335,17 +433,37 @@ const legend = DESC_KINDS.filter((d) => d.colored)
       v-if="palette && s.ui.cursor"
       :session="s"
       :cursor="s.ui.cursor"
-      :at="palette.at"
       :reason="palette.reason"
+      :busy="analyzing"
       @run="runAction"
       @set-kind="(k) => { s.setKind(s.ui.cursor!.key, k); closePalette(); notify.push(`本段已设为${kindLabel(k)}。`) }"
       @close="closePalette"
+      @utility="runUtility"
     />
+
+    <v-dialog :model-value="organizeOpen" max-width="760" scrollable @update:model-value="!$event && closeOrganize()">
+      <v-card title="AI 整理段落类型">
+        <v-card-text>
+          <div v-if="organizing" class="d-flex align-center ga-3 py-4" role="status"><v-progress-circular indeterminate size="24" />正在结合全文推断每段的类型</div>
+          <v-alert v-else-if="organizeError" type="error" variant="tonal">{{ organizeError }}</v-alert>
+          <template v-else>
+            <p class="text-body-2 sk-muted mb-4">检查每段的推断结果，可在应用前调整。只修改类型，正文保持原样。</p>
+            <v-list lines="two" class="pa-0">
+              <v-list-item v-for="row in organized" :key="row.key" :title="`第 ${row.index + 1} 段 · 原类型：${kindLabel(row.before)}`" :subtitle="row.role" class="px-0 py-2">
+                <template #append><v-select v-model="row.after" :items="PARAGRAPH_KINDS" item-value="value" item-title="title" :label="`第 ${row.index + 1} 段类型`" width="140" hide-details class="ml-4" /></template>
+              </v-list-item>
+            </v-list>
+          </template>
+        </v-card-text>
+        <v-card-actions><v-btn :disabled="organizing" @click="organizeTypes">重新推断</v-btn><v-spacer /><v-btn @click="closeOrganize">{{ organizing ? '取消分析' : '取消' }}</v-btn><v-btn variant="flat" color="primary" :disabled="organizing || !!organizeError || !organized.length" @click="applyOrganizedTypes">应用类型</v-btn></v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
 <style scoped>
 .sk-article {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -356,16 +474,18 @@ const legend = DESC_KINDS.filter((d) => d.colored)
   display: flex;
   align-items: center;
   gap: 4px;
-  min-height: 36px;
-  padding: 0 8px;
+  min-height: 48px;
+  padding: 4px 8px;
   border-bottom: 1px solid var(--sk-line);
   font-size: 13px;
-  overflow-x: auto;
+  flex-wrap: wrap;
 }
 .sk-tb-group {
   display: flex;
   align-items: center;
   gap: 2px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 .sk-tb-sep {
   width: 1px;
@@ -375,12 +495,6 @@ const legend = DESC_KINDS.filter((d) => d.colored)
 }
 .sk-tb-fill {
   flex: 1;
-}
-.sk-tb-status {
-  margin-left: 8px;
-  font-size: 12px;
-  color: var(--sk-muted);
-  white-space: nowrap;
 }
 .sk-layer {
   height: 26px;
@@ -410,34 +524,44 @@ const legend = DESC_KINDS.filter((d) => d.colored)
   min-width: 3.2em;
   text-align: center;
 }
-.sk-sync-error {
-  flex: none;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 6px 12px;
-  font-size: 13px;
-  border-bottom: 1px solid rgb(var(--v-theme-error));
-  background-color: rgba(var(--v-theme-error), 0.08);
-}
 .sk-scroll {
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow: auto;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
 }
 .sk-paper {
   position: relative;
-  max-width: 44em;
+  width: min(var(--sk-paper-width), calc(100% - 192px));
   margin: 0 auto;
-  padding: 36px 32px 0 112px;
+  padding: 32px 0 0;
+}
+.sk-editor-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  flex: none;
+  gap: 4px 12px;
+  padding: 4px 12px;
+  border-top: 1px solid var(--sk-line);
+  font-size: 12px;
+}
+.sk-footer-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  flex: 1;
 }
 .sk-host {
   position: relative;
 }
 @media (max-width: 760px) {
   .sk-paper {
-    padding: 24px 16px 0 88px;
+    width: auto;
+    margin: 0 16px 0 88px;
+    padding: 24px 0 0;
   }
 }
 </style>

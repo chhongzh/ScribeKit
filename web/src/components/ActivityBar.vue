@@ -18,32 +18,32 @@ const items: { id: Activity; icon: string; label: string; key: string }[] = [
   <nav class="sk-activity bg-sk-chrome" aria-label="活动栏">
     <v-tooltip v-for="it in items" :key="it.id" location="end" :text="it.key ? `${it.label}（${it.key}）` : it.label">
       <template #activator="{ props: tp }">
-        <button
+        <v-btn
           v-bind="tp"
           type="button"
           class="sk-act"
-          :class="{ 'sk-act-on': ui.activity === it.id && ui.layout.sidebarOpen }"
+          :active="ui.activity === it.id && ui.layout.sidebarOpen"
+          :color="ui.activity === it.id && ui.layout.sidebarOpen ? 'primary' : undefined"
+          :icon="it.icon"
+          variant="text"
           :aria-label="it.label"
           :aria-pressed="ui.activity === it.id && ui.layout.sidebarOpen"
           @click="ui.showActivity(it.id)"
-        >
-          <v-icon :icon="it.icon" size="22" />
-        </button>
+        />
       </template>
     </v-tooltip>
     <div class="sk-act-spacer" />
     <v-tooltip location="end" text="设置（Ctrl+,）">
       <template #activator="{ props: tp }">
-        <button
+        <v-btn
           v-bind="tp"
           type="button"
           class="sk-act"
-          :class="{ 'sk-act-on': editor.activeTab?.type === 'settings' }"
+          :active="editor.activeTab?.type === 'settings'"
+          :icon="mdiCogOutline"
           aria-label="设置"
           @click="editor.openSettings()"
-        >
-          <v-icon :icon="mdiCogOutline" size="22" />
-        </button>
+        />
       </template>
     </v-tooltip>
   </nav>
@@ -52,10 +52,12 @@ const items: { id: Activity; icon: string; label: string; key: string }[] = [
 <style scoped>
 .sk-activity {
   flex: none;
-  width: 48px;
+  width: 64px;
   display: flex;
   flex-direction: column;
-  align-items: stretch;
+  align-items: center;
+  gap: 8px;
+  padding-block: 8px;
   border-right: 1px solid var(--sk-line);
 }
 .sk-act {
@@ -67,7 +69,6 @@ const items: { id: Activity; icon: string; label: string; key: string }[] = [
   border: 0;
   cursor: pointer;
   color: var(--sk-muted);
-  border-left: 2px solid rgba(var(--v-theme-primary), 0);
 }
 .sk-act:hover {
   color: rgb(var(--v-theme-on-surface));

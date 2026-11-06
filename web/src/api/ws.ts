@@ -19,10 +19,11 @@ const MAX_DELAY = 15000
 const PING_EVERY = 25000
 
 export class WsClient {
-  readonly state = reactive({ status: 'closed' as WsStatus, retryIn: 0, attempts: 0, lastError: '' })
+  readonly state = reactive({ status: 'closed' as WsStatus, retryIn: 0, attempts: 0, lastError: '', active: 0, usedTokens: 0, promptTokens: 0, completionTokens: 0, missingUsage: 0 })
   private sock: WebSocket | null = null
   private seq = 0
   private handlers = new Map<string, Handler>()
+	private deadlines = new Map<string, ReturnType<typeof setTimeout>>()
   private listeners = new Map<string, Set<Handler>>()
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private countdown: ReturnType<typeof setInterval> | null = null
@@ -87,9 +88,17 @@ export class WsClient {
         this.log('sys', '收到无法解析的帧，已忽略')
         return
       }
-      if (msg.type !== 'pong' && msg.type !== 'scaffold.delta') this.log('in', `${msg.type}${msg.id ? ` #${msg.id}` : ''}`, msg)
+      if (msg.type !== 'pong' && msg.type !== 'scaffold.delta' && msg.type !== 'agent.usage') this.log('in', `${msg.type}${msg.id ? ` #${msg.id}` : ''}`, msg)
       const h = msg.id ? this.handlers.get(msg.id) : undefined
       if (h) h(msg)
+      if (msg.type === 'agent.usage') {
+        const usage = msg.payload as { activeAgents: number; totalTokens: number; promptTokens: number; completionTokens: number; missingUsage: number }
+        this.state.active = usage.activeAgents
+        this.state.usedTokens = usage.totalTokens
+        this.state.promptTokens = usage.promptTokens
+        this.state.completionTokens = usage.completionTokens
+        this.state.missingUsage = usage.missingUsage
+      }
       this.emit(msg)
     }
     sock.onclose = (ev) => {
@@ -97,11 +106,14 @@ export class WsClient {
       this.pingTimer = null
       this.sock = null
       this.state.status = 'closed'
+      this.state.active = 0
       // 断开时所有进行中的请求都失败，发起者按 error 处理。
       for (const [id, h] of [...this.handlers]) {
         h({ id, type: 'error', payload: { code: 'disconnected', message: '连接已断开' } })
       }
       this.handlers.clear()
+	  for (const timer of this.deadlines.values()) clearTimeout(timer)
+	  this.deadlines.clear()
       this.log('sys', `连接断开${ev.code ? `（${ev.code}）` : ''}`)
       this.emit({ id: '', type: '$close', payload: {} })
       if (!this.stopped) this.scheduleRetry()
@@ -136,10 +148,22 @@ export class WsClient {
   }
 
   /** 发送请求。未连接时返回 null，调用方负责提示。 */
-  send(type: string, payload: unknown, handler?: Handler, id = this.nextId()): string | null {
+  send(type: string, payload: unknown, handler?: Handler, id = this.nextId(), timeout = 190000): string | null {
     if (!this.sock || this.sock.readyState !== WebSocket.OPEN) return null
-    if (handler) this.handlers.set(id, handler)
-    this.sock.send(JSON.stringify({ id, type, payload }))
+    if (handler) {
+      this.handlers.set(id, handler)
+      this.deadlines.set(id, setTimeout(() => {
+        this.release(id)
+        this.cancel(id)
+        handler({ id, type: 'error', payload: { code: 'timeout', message: '模型响应超时，请重试或检查模型服务。' } })
+      }, timeout))
+    }
+    try {
+      this.sock.send(JSON.stringify({ id, type, payload }))
+    } catch {
+      this.release(id)
+      return null
+    }
     if (type !== 'ping') this.log('out', `${type} #${id}`, { id, type, payload })
     return id
   }
@@ -162,6 +186,9 @@ export class WsClient {
 
   release(id: string): void {
     this.handlers.delete(id)
+    const timer = this.deadlines.get(id)
+    if (timer) clearTimeout(timer)
+    this.deadlines.delete(id)
   }
 
   cancel(targetId: string): void {

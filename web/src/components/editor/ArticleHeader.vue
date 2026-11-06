@@ -7,6 +7,7 @@ import { GENRES } from '../../core/labels'
 import type { ArticleSession } from '../../editor/session'
 import { blockedReason } from '../../editor/scaffold'
 import { useWorkspaceStore } from '../../stores/workspace'
+import ExpandableTextarea from '../ExpandableTextarea.vue'
 
 const props = defineProps<{ session: ArticleSession }>()
 const emit = defineEmits<{ (e: 'enter-body'): void }>()
@@ -14,8 +15,8 @@ const emit = defineEmits<{ (e: 'enter-body'): void }>()
 const workspace = useWorkspaceStore()
 const meta = props.session.meta
 const synopsisOpen = ref(!meta.synopsis.trim())
-const saveState = ref<'idle' | 'saving' | 'error'>('idle')
-const saveError = ref('')
+const save = props.session.metadataSave
+props.session.retryMetadata = flush
 let timer: ReturnType<typeof setTimeout> | null = null
 let pending: Partial<{ title: string; synopsis: string; genre: Genre; subgenre: string }> = {}
 
@@ -24,7 +25,7 @@ const synopsisPreview = computed(() => meta.synopsis.split('\n').find((l) => l.t
 
 function queue(patch: typeof pending) {
   pending = { ...pending, ...patch }
-  saveState.value = 'saving'
+  save.status = 'saving'
   if (timer) clearTimeout(timer)
   timer = setTimeout(flush, 800)
 }
@@ -37,11 +38,12 @@ async function flush() {
   try {
     await api.updateArticle(meta.id, body)
     workspace.patchSummary(meta.id, body)
-    saveState.value = Object.keys(pending).length ? 'saving' : 'idle'
+    save.status = Object.keys(pending).length ? 'saving' : 'idle'
+    save.error = ''
   } catch (e) {
     pending = { ...body, ...pending }
-    saveState.value = 'error'
-    saveError.value = describeError(e)
+    save.status = 'error'
+    save.error = describeError(e)
   }
 }
 
@@ -63,6 +65,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  props.session.retryMetadata = null
   if (timer) {
     clearTimeout(timer)
     void flush()
@@ -79,11 +82,12 @@ function onTitleKey(e: KeyboardEvent) {
 
 <template>
   <header class="sk-head">
-    <input
+    <v-text-field
       v-model="meta.title"
-      class="sk-title"
+      class="sk-title mb-3"
       type="text"
       placeholder="标题"
+      label="标题"
       aria-label="标题"
       @keydown="onTitleKey"
     />
@@ -97,18 +101,13 @@ function onTitleKey(e: KeyboardEvent) {
         aria-label="文体"
       />
       <v-text-field v-model="meta.subgenre" label="细分" density="compact" class="sk-subgenre" placeholder="如：写人记叙文" />
-      <span class="sk-head-save sk-muted text-caption" role="status">
-        <template v-if="saveState === 'saving'">保存中</template>
-        <span v-else-if="saveState === 'error'" class="text-error">标题或梗概没有保存：{{ saveError }}
-          <button type="button" class="sk-plain text-decoration-underline" @click="flush">重试</button>
-        </span>
-      </span>
     </div>
 
     <div class="sk-synopsis">
-      <button
+      <v-btn
         type="button"
-        class="sk-synopsis-toggle"
+        block
+        class="justify-start"
         :aria-expanded="synopsisOpen"
         aria-controls="sk-synopsis-body"
         @click="synopsisOpen = !synopsisOpen"
@@ -116,13 +115,15 @@ function onTitleKey(e: KeyboardEvent) {
         <v-icon :icon="synopsisOpen ? mdiChevronDown : mdiChevronRight" size="16" />
         <span>梗概</span>
         <span v-if="!synopsisOpen" class="sk-synopsis-preview">{{ synopsisPreview || '还没写' }}</span>
-      </button>
-      <textarea
+      </v-btn>
+      <ExpandableTextarea
         v-show="synopsisOpen"
         id="sk-synopsis-body"
         v-model="meta.synopsis"
-        class="sk-synopsis-text"
-        rows="4"
+        class="mt-2"
+        :rows="4"
+        auto-grow
+        label="梗概"
         placeholder="草稿区，可以凌乱：想写什么，从哪里起笔，最后落到什么上。Scaffolder 只从这里和正文了解你的意图。"
         aria-label="梗概"
       />
@@ -138,14 +139,12 @@ function onTitleKey(e: KeyboardEvent) {
 }
 .sk-title {
   width: 100%;
+  min-width: 0;
+}
+.sk-title :deep(input) {
   font-family: var(--sk-font-body);
-  font-size: 28px;
+  font-size: 1.55em;
   font-weight: 600;
-  line-height: 1.5;
-  border: 0;
-  background: none;
-  color: rgb(var(--v-theme-on-surface));
-  padding: 4px 0;
 }
 .sk-title::placeholder,
 .sk-synopsis-text::placeholder {
@@ -159,36 +158,17 @@ function onTitleKey(e: KeyboardEvent) {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
   margin: 8px 0 12px;
 }
 .sk-genre {
-  flex: 0 0 140px;
+  flex: 1 1 140px;
 }
 .sk-subgenre {
-  flex: 0 0 200px;
-}
-.sk-head-save {
-  flex: 1;
-  text-align: right;
+  flex: 1 1 160px;
 }
 .sk-synopsis {
-  border: 1px solid var(--sk-line);
-  border-radius: 3px;
-}
-.sk-synopsis-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  min-height: 32px;
-  padding: 0 8px;
-  background: none;
-  border: 0;
-  color: inherit;
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-  text-align: left;
+  min-width: 0;
 }
 .sk-synopsis-preview {
   flex: 1;
@@ -198,22 +178,6 @@ function onTitleKey(e: KeyboardEvent) {
   white-space: nowrap;
   color: var(--sk-muted);
   font-family: var(--sk-font-body);
-}
-.sk-synopsis-text {
-  display: block;
-  width: 100%;
-  resize: vertical;
-  border: 0;
-  border-top: 1px dashed var(--sk-line);
-  padding: 8px 12px;
-  font-family: var(--sk-font-body);
-  font-size: 15px;
-  line-height: 1.8;
-  color: rgb(var(--v-theme-on-surface));
-  background: none;
-}
-.sk-synopsis-text:focus-visible {
-  outline-offset: -2px;
 }
 .sk-principle {
   margin: 12px 0 0;

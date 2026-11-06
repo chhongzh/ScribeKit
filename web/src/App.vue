@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from 'vue'
 import { ws } from './api/ws'
+import { globalShortcut } from './core/shortcuts'
+import { toggleFullscreen } from './core/fullscreen'
+import { useNotifyStore } from './stores/notify'
 import ActivityBar from './components/ActivityBar.vue'
 import DialogHost from './components/DialogHost.vue'
 import NoticeHost from './components/NoticeHost.vue'
@@ -27,32 +30,52 @@ const editor = useEditorStore()
 const analysis = useAnalysisStore()
 const suggestions = useSuggestionStore()
 const log = useLogStore()
+const notify = useNotifyStore()
 
 ws.log = (dir, text, msg) => log.add(dir, text, msg)
 
 function onKey(e: KeyboardEvent) {
-  const mod = e.ctrlKey || e.metaKey
+  if (e.isComposing || e.keyCode === 229) return
   // 焦点不在正文里时 Esc 也能取消正在生成的建议；编辑器、对话框自己处理过的 Esc 不再重复处理。
   if (e.key === 'Escape' && !e.defaultPrevented) {
     const s = editor.activeSession
     if (s && suggestions.cancelLatest(s.articleId)) e.preventDefault()
     return
   }
-  if (mod && e.shiftKey && e.code === 'KeyE') {
-    e.preventDefault()
-    ui.showActivity('explorer')
-  } else if (mod && e.code === 'KeyB' && !e.shiftKey) {
-    e.preventDefault()
-    ui.layout.sidebarOpen = !ui.layout.sidebarOpen
-  } else if (mod && e.code === 'KeyJ') {
-    e.preventDefault()
-    ui.layout.panelOpen = !ui.layout.panelOpen
-  } else if (mod && e.altKey && e.code === 'KeyB') {
-    e.preventDefault()
-    ui.layout.inspectorOpen = !ui.layout.inspectorOpen
-  } else if (mod && e.code === 'Comma') {
-    e.preventDefault()
-    editor.openSettings()
+}
+
+function captureKey(event: KeyboardEvent) {
+  if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
+  const session = editor.activeSession
+  const action = globalShortcut(event)
+  const target = event.target instanceof Element ? event.target : null
+  const overlay = target?.closest('.v-overlay__content, [role="dialog"]')
+  const input = target?.closest('input, textarea, [contenteditable="true"]')
+  const inEditor = !!session?.view?.dom.contains(target)
+  if (overlay) return
+  if (action === 'palette' && (!session || (input && !inEditor))) return
+  if (action === 'save' && !session) return
+  if ((action === 'find' || action === 'replace') && (!session || (input && !inEditor && !target?.closest('.sk-search-panel')))) return
+  let handled = !!action
+  if (action && !event.repeat) {
+    switch (action) {
+      case 'explorer': ui.showActivity('explorer'); break
+      case 'sidebar': ui.layout.sidebarOpen = !ui.layout.sidebarOpen; break
+      case 'panel': ui.layout.panelOpen = !ui.layout.panelOpen; break
+      case 'inspector': ui.layout.inspectorOpen = !ui.layout.inspectorOpen; break
+      case 'settings': editor.openSettings(); break
+      case 'palette': session?.openPalette(); break
+      case 'save': void session?.sync.flush().catch(() => {}); break
+      case 'find': session?.openSearch(); break
+      case 'replace': session?.openSearch(true); break
+      case 'fullscreen': void toggleFullscreen().catch(() => notify.error('浏览器没有进入全屏，请使用浏览器的全屏菜单。')); break
+    }
+  } else if (!action && event.key !== 'Escape' && inEditor) {
+    handled = session?.handleShortcut(event) ?? false
+  }
+  if (handled) {
+    event.preventDefault()
+    event.stopPropagation()
   }
 }
 
@@ -69,6 +92,7 @@ onMounted(async () => {
   fitNarrow()
   narrow.addEventListener('change', fitNarrow)
   window.addEventListener('keydown', onKey)
+  window.addEventListener('keydown', captureKey, true)
   ws.start()
   ws.on('$open', () => analysis.resume())
   await Promise.all([settings.load(), workspace.refresh()])
@@ -76,6 +100,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
+  window.removeEventListener('keydown', captureKey, true)
   narrow.removeEventListener('change', fitNarrow)
   ws.stop()
 })

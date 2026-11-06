@@ -12,6 +12,7 @@ const IDLE_MS = 1200
 
 interface ArticleAnalysisState {
   inflight: number
+  preparing: number
   error: string
   errorCode: string
   articleLoading: boolean
@@ -26,10 +27,13 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const paused = ref(false)
   const timers = new Map<string, ReturnType<typeof setTimeout>>()
   const sessionOf = new Map<number, ArticleSession>()
+  const requests = new Map<string, { articleId: number; done: () => void }>()
+  const epochs = new Map<number, number>()
+  const pendingParagraphs = new Set<string>()
   const log = useLogStore()
 
   function st(articleId: number): ArticleAnalysisState {
-    if (!status[articleId]) status[articleId] = { inflight: 0, error: '', errorCode: '', articleLoading: false }
+    if (!status[articleId]) status[articleId] = { inflight: 0, preparing: 0, error: '', errorCode: '', articleLoading: false }
     return status[articleId]!
   }
 
@@ -39,6 +43,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
   }
 
   function detach(articleId: number) {
+    cancel(articleId)
     sessionOf.delete(articleId)
     for (const [k, t] of timers) {
       if (k.startsWith(`${articleId}:`)) {
@@ -72,69 +77,134 @@ export const useAnalysisStore = defineStore('analysis', () => {
   /** 把段落交给 Analyzer。调用前会先把这些段落写入后端，后端按库里的文本分析。 */
   async function analyzeParagraphs(session: ArticleSession, keys: string[]) {
     const s = st(session.articleId)
+    const epoch = epochs.get(session.articleId) ?? 0
+    const current = () => sessionOf.get(session.articleId) === session && (epochs.get(session.articleId) ?? 0) === epoch
+    s.preparing++
     try {
       await session.sync.flush()
+      await ws.whenOpen()
     } catch {
       s.error = '有改动尚未保存，先处理保存失败再分析。'
       return
+    } finally {
+      if ((epochs.get(session.articleId) ?? 0) === epoch) s.preparing = Math.max(0, s.preparing - 1)
     }
-    const ids = keys
+    if (!current()) return
+    const fingerprint = (id: number) => `${id}:${textHash(session.textOfId(id) ?? '')}`
+    const ids = [...new Set(keys
       .map((k) => session.sync.idOf(k))
-      .filter((id): id is number => id !== null)
+      .filter((id): id is number => id !== null))]
       .filter((id) => {
+        if (pendingParagraphs.has(fingerprint(id))) return false
         const text = session.textOfId(id) ?? ''
         if (text.trim() === '') return false
         const old = byParagraph[id]
-        return !old || old.textHash !== textHash(text)
+        return !old || old.partial || old.textHash !== textHash(text)
       })
     if (ids.length === 0) return
-    await ws.whenOpen()
-    const remaining = new Set(ids)
+    const fingerprints = ids.map(fingerprint)
+    for (const key of fingerprints) pendingParagraphs.add(key)
     s.inflight++
     s.error = ''
+    s.errorCode = ''
+    let finished = false
     const done = () => {
+      if (finished) return
+      finished = true
       s.inflight = Math.max(0, s.inflight - 1)
       ws.release(reqId!)
+      requests.delete(reqId!)
+      for (const key of fingerprints) pendingParagraphs.delete(key)
     }
     const reqId = ws.send('analyze.paragraphs', { articleId: session.articleId, paragraphIds: ids }, (msg: Envelope) => {
       if (msg.type === 'analyze.result') {
         const a = msg.payload as ParagraphAnalysis
         accept(a)
-        remaining.delete(a.paragraphId)
-        if (remaining.size === 0) done()
+      } else if (msg.type === 'analyze.done') {
+        done()
       } else if (msg.type === 'error') {
         fail(session.articleId, msg.payload as { code?: string; message?: string })
         done()
       }
     })
     if (!reqId) {
-      s.inflight = Math.max(0, s.inflight - 1)
+      done()
       s.error = 'WebSocket 未连接，分析请求没有发出。'
+    } else {
+      requests.set(reqId, { articleId: session.articleId, done })
     }
   }
 
   async function analyzeArticle(session: ArticleSession) {
     const s = st(session.articleId)
+    if (s.articleLoading) return
+    s.articleLoading = true
+    s.error = ''
+    s.errorCode = ''
+    const epoch = epochs.get(session.articleId) ?? 0
     await analyzeParagraphs(
       session,
       session.localRows().map((r) => r.key),
     )
-    s.articleLoading = true
     await ws.whenOpen()
+    if (sessionOf.get(session.articleId) !== session || (epochs.get(session.articleId) ?? 0) !== epoch || s.error) {
+      s.articleLoading = false
+      return
+    }
+    s.error = ''
+    s.errorCode = ''
+    const done = () => {
+      s.articleLoading = false
+      ws.release(id!)
+      requests.delete(id!)
+    }
     const id = ws.send('analyze.article', { articleId: session.articleId }, (msg) => {
       if (msg.type === 'analyze.articleResult') {
         byArticle[session.articleId] = msg.payload as ArticleAnalysis
-        s.articleLoading = false
-        ws.release(id!)
+        done()
       } else if (msg.type === 'error') {
         fail(session.articleId, msg.payload as { code?: string; message?: string })
-        s.articleLoading = false
-        ws.release(id!)
+        done()
       }
     })
     if (!id) {
       s.articleLoading = false
       s.error = 'WebSocket 未连接，分析请求没有发出。'
+    } else {
+      requests.set(id, { articleId: session.articleId, done })
+    }
+  }
+
+  async function inferStructure(session: ArticleSession): Promise<ArticleAnalysis> {
+    const state = st(session.articleId)
+    if (state.articleLoading) throw new Error('全文分析正在进行')
+    const epoch = epochs.get(session.articleId) ?? 0
+    state.articleLoading = true
+    state.error = ''
+    state.errorCode = ''
+    try {
+      await session.sync.flush()
+      await ws.whenOpen()
+      if (sessionOf.get(session.articleId) !== session || (epochs.get(session.articleId) ?? 0) !== epoch) throw new Error('分析已取消')
+      return await new Promise<ArticleAnalysis>((resolve, reject) => {
+        const cleanup = () => { ws.release(id!); requests.delete(id!) }
+        const id = ws.send('analyze.article', { articleId: session.articleId }, (message) => {
+          if (message.type === 'analyze.articleResult') {
+            const result = message.payload as ArticleAnalysis
+            byArticle[session.articleId] = result
+            cleanup()
+            resolve(result)
+          } else if (message.type === 'error') {
+            fail(session.articleId, message.payload as { code?: string; message?: string })
+            cleanup()
+            reject(new Error(state.error))
+          }
+        })
+        if (!id) reject(new Error('WebSocket 未连接'))
+        else requests.set(id, { articleId: session.articleId, done: () => { cleanup(); reject(new Error('分析已取消')) } })
+      })
+    } finally {
+      state.articleLoading = false
     }
   }
 
@@ -160,22 +230,46 @@ export const useAnalysisStore = defineStore('analysis', () => {
   async function analyzeText(articleId: number, paragraphKind: ParagraphKind, text: string): Promise<ParagraphAnalysis> {
     await ws.whenOpen()
     return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        ws.release(id!)
+        requests.delete(id!)
+      }
       const id = ws.send('analyze.text', { articleId, paragraphKind, text }, (msg) => {
         if (msg.type === 'analyze.textResult') {
-          ws.release(id!)
+          cleanup()
           resolve(msg.payload as ParagraphAnalysis)
         } else if (msg.type === 'error') {
-          ws.release(id!)
+          cleanup()
           const p = msg.payload as { code?: string; message?: string }
           reject(new Error(p.code === 'disconnected' ? '连接断开' : wsErrorText(p.code ?? 'internal', p.message)))
         }
       })
       if (!id) reject(new Error('WebSocket 未连接'))
+      else requests.set(id, { articleId, done: () => {
+        cleanup()
+        reject(new Error('分析已取消'))
+      } })
     })
   }
 
   function resume() {
     paused.value = false
+  }
+
+  function cancel(articleId: number) {
+    epochs.set(articleId, (epochs.get(articleId) ?? 0) + 1)
+    for (const [key, timer] of timers) {
+      if (!key.startsWith(`${articleId}:`)) continue
+      clearTimeout(timer)
+      timers.delete(key)
+    }
+    for (const [id, request] of requests) {
+      if (request.articleId !== articleId) continue
+      ws.cancel(id)
+      request.done()
+    }
+    st(articleId).articleLoading = false
+    st(articleId).preparing = 0
   }
 
   return {
@@ -188,8 +282,10 @@ export const useAnalysisStore = defineStore('analysis', () => {
     detach,
     analyzeParagraphs,
     analyzeArticle,
+    inferStructure,
     schedule,
     analyzeText,
     resume,
+    cancel,
   }
 })

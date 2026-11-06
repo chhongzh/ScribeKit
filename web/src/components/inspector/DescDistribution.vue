@@ -97,7 +97,7 @@ function segTitle(seg: Seg) {
             type="button"
             class="sk-dist-seg"
             :class="seg.desc ? `sk-desc-${seg.desc}` : 'sk-dist-none'"
-            :style="{ flexBasis: `${seg.width}%` }"
+            :style="{ flexBasis: `${seg.width}%`, backgroundColor: seg.desc ? `rgb(var(--v-theme-desc-${seg.desc}))` : undefined }"
             :title="segTitle(seg)"
             :aria-label="segTitle(seg)"
             @click="go(r, seg)"
@@ -113,7 +113,7 @@ function segTitle(seg: Seg) {
       <p class="sk-muted text-caption mb-1">全文半句数（一个半句可以同时属于几类）</p>
       <ul>
         <li v-for="t in totals" :key="t.value">
-          <span class="sk-dist-chip" :class="t.colored ? `sk-desc-${t.value}` : 'sk-dist-none'" aria-hidden="true" />
+          <span class="sk-dist-chip" :class="t.colored ? `sk-desc-${t.value}` : 'sk-dist-none'" :style="t.colored ? { backgroundColor: `rgb(var(--v-theme-desc-${t.value}))` } : undefined" aria-hidden="true" />
           <span>{{ t.title }}</span>
           <span class="sk-dist-n">{{ t.n }}</span>
         </li>

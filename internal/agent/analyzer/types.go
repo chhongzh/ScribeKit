@@ -36,6 +36,7 @@ type Diagnostic struct {
 }
 
 type ParagraphAnalysis struct {
+	Partial      bool                 `json:"partial,omitempty"`
 	ParagraphID  int                  `json:"paragraphId"`
 	TextHash     string               `json:"textHash"`
 	Segmentation textseg.Segmentation `json:"segmentation"`

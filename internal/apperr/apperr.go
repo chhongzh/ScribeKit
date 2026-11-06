@@ -12,6 +12,7 @@ const (
 	NeedsUserInput     = "needs_user_input"
 	UserOwnedParagraph = "user_owned_paragraph"
 	Cancelled          = "cancelled"
+	Timeout            = "timeout"
 	BadRequest         = "bad_request"
 	NotFound           = "not_found"
 	Conflict           = "conflict"
@@ -37,6 +38,8 @@ func From(err error) *Error {
 		return ae
 	case errors.Is(err, context.Canceled):
 		return &Error{Code: Cancelled, Message: "请求已取消"}
+	case errors.Is(err, context.DeadlineExceeded):
+		return &Error{Code: Timeout, Message: "模型响应超时，请重试或检查模型服务"}
 	default:
 		return &Error{Code: Internal, Message: "服务内部错误"}
 	}

@@ -11,6 +11,9 @@ import (
 	"io/fs"
 	"path"
 	"strings"
+	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/nikolalohinski/gonja"
@@ -73,7 +76,16 @@ func mustEngine() *engine {
 	return e
 }
 
-func (e *engine) render(name string, vars any) (string, error) {
+func (e *engine) render(name string, vars any) (result string, err error) {
+	started := time.Now()
+	defer func() {
+		fields := []zap.Field{zap.String("template", name), zap.Duration("duration", time.Since(started)), zap.Int("output_bytes", len(result))}
+		if err != nil {
+			zap.L().Error("prompt.render.failed", append(fields, zap.Error(err))...)
+		} else {
+			zap.L().Info("prompt.render.completed", fields...)
+		}
+	}()
 	tpl, ok := e.templates[name]
 	if !ok {
 		return "", fmt.Errorf("unknown template %s", name)

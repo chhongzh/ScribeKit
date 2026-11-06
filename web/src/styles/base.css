@@ -76,7 +76,7 @@ button.sk-plain {
 
 .sk-doc {
   font-family: var(--sk-font-body);
-  font-size: 18px;
+  font-size: inherit;
   line-height: 2;
   color: rgb(var(--v-theme-on-surface));
   word-break: break-word;
@@ -94,6 +94,9 @@ button.sk-plain {
 .sk-doc ::selection {
   background-color: rgba(var(--v-theme-primary), 0.22);
 }
+
+.sk-search-match { background-color: rgba(var(--v-theme-warning), 0.25); outline: 1px solid rgb(var(--v-theme-warning)); }
+.sk-search-current { background-color: rgba(var(--v-theme-primary), 0.25); outline: 2px solid rgb(var(--v-theme-primary)); }
 
 .sk-para {
   position: relative;
@@ -224,21 +227,27 @@ button.sk-plain {
 
 /* 描写类型底色（SPEC §7） */
 .sk-desc-appearance {
+  color: rgb(var(--v-theme-on-desc-appearance));
   background-color: rgba(var(--v-theme-desc-appearance), var(--v-sk-alpha-appearance));
 }
 .sk-desc-speech {
+  color: rgb(var(--v-theme-on-desc-speech));
   background-color: rgba(var(--v-theme-desc-speech), var(--v-sk-alpha-speech));
 }
 .sk-desc-action {
+  color: rgb(var(--v-theme-on-desc-action));
   background-color: rgba(var(--v-theme-desc-action), var(--v-sk-alpha-action));
 }
 .sk-desc-psychology {
+  color: rgb(var(--v-theme-on-desc-psychology));
   background-color: rgba(var(--v-theme-desc-psychology), var(--v-sk-alpha-psychology));
 }
 .sk-desc-expression {
+  color: rgb(var(--v-theme-on-desc-expression));
   background-color: rgba(var(--v-theme-desc-expression), var(--v-sk-alpha-expression));
 }
 .sk-desc-environment {
+  color: rgb(var(--v-theme-on-desc-environment));
   background-color: rgba(var(--v-theme-desc-environment), var(--v-sk-alpha-environment));
 }
 

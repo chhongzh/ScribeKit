@@ -15,7 +15,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cloudwego/eino/callbacks"
 	"github.com/gofiber/fiber/v3"
+	"go.uber.org/zap"
 
 	"github.com/chhongzh/scribekit/internal/agent/analyzer"
 	"github.com/chhongzh/scribekit/internal/agent/scaffolder"
@@ -23,12 +25,23 @@ import (
 	"github.com/chhongzh/scribekit/internal/config"
 	"github.com/chhongzh/scribekit/internal/guide"
 	"github.com/chhongzh/scribekit/internal/llm"
+	"github.com/chhongzh/scribekit/internal/logging"
 	"github.com/chhongzh/scribekit/internal/store"
 	"github.com/chhongzh/scribekit/internal/ws"
 	"github.com/chhongzh/scribekit/web"
 )
 
 func main() {
+	logConfig := zap.NewProductionConfig()
+	logConfig.Sampling = nil
+	logger, err := logConfig.Build()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	zap.ReplaceGlobals(logger)
+	callbacks.AppendGlobalHandlers(logging.EinoHandler())
+	defer logger.Sync()
 	cfg, err := config.Parse(os.Args[1:], os.Stderr)
 	if errors.Is(err, flag.ErrHelp) {
 		return
@@ -38,6 +51,7 @@ func main() {
 	}
 	if err := run(cfg); err != nil {
 		slog.Error("scribekit 退出", "err", err)
+		_ = logger.Sync()
 		os.Exit(1)
 	}
 }

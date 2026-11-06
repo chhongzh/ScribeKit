@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useDialogStore } from '../stores/dialogs'
+import ExpandableTextarea from './ExpandableTextarea.vue'
 
 const dialogs = useDialogStore()
 const value = ref('')
@@ -36,7 +37,7 @@ function ok() {
     <v-card v-if="dialogs.current" :title="dialogs.current.title">
       <v-card-text>
         <template v-if="dialogs.current.kind === 'prompt'">
-          <v-textarea
+          <ExpandableTextarea
             v-if="dialogs.current.multiline"
             v-model="value"
             :label="dialogs.current.label"

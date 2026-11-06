@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import sample from './__fixtures__/mtb-sample.json'
-import { COLORED_DESC, defaultThemePair, themeFromMtb } from './theme'
+import { COLORED_DESC, themeFromMtb } from './theme'
 
 // mtb-sample.json 由 material-color-utilities 按 MTB 的规则从种子色生成，代表用户导入的文件。
 
@@ -35,11 +35,4 @@ describe('material-theme-builder 导入', () => {
     if (!r.ok) expect(r.error).toContain('schemes.light')
   })
 
-  test('默认主题补齐别名与描写底色', () => {
-    const light = { background: 'L-bg', surface: 'L-s', 'surface-light': 'L-sl', primary: 'L-p', secondary: 'L-2', success: 'L-ok', error: 'L-e', warning: 'L-w', info: 'L-i' }
-    const pair = defaultThemePair({ light, dark: light })
-    expect(pair.light.colors['sk-editor']).toBe('L-bg')
-    expect(pair.light.colors['desc-appearance']).toBe('L-p')
-    expect(pair.light.variables['sk-alpha-speech']).toBeGreaterThan(0)
-  })
 })

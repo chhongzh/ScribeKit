@@ -4,23 +4,28 @@ package ws
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net"
 	"sync"
+	"time"
 
+	"github.com/cloudwego/eino/schema"
 	"github.com/gofiber/contrib/v3/websocket"
 	"github.com/gofiber/fiber/v3"
 
+	"github.com/chhongzh/scribekit/internal/agent"
 	"github.com/chhongzh/scribekit/internal/agent/analyzer"
 	"github.com/chhongzh/scribekit/internal/agent/scaffolder"
 	"github.com/chhongzh/scribekit/internal/apperr"
+	"github.com/chhongzh/scribekit/internal/logging"
 	"github.com/chhongzh/scribekit/internal/store"
+	"go.uber.org/zap"
 )
 
 const (
 	textMessage = 1
 	// 一条请求只带 id 和几个小字段，analyze.text 带一段正文，1 MiB 绰绰有余。
 	maxMessageBytes = 1 << 20
+	usageInterval   = 100 * time.Millisecond
 )
 
 type Analyzer interface {
@@ -43,6 +48,40 @@ type Conn interface {
 type Hub struct {
 	analyzer   Analyzer
 	scaffolder Scaffolder
+	metricsMu  sync.Mutex
+	metrics    agentMetrics
+}
+
+type agentMetrics struct {
+	ActiveAgents     int `json:"activeAgents"`
+	PromptTokens     int `json:"promptTokens"`
+	CompletionTokens int `json:"completionTokens"`
+	TotalTokens      int `json:"totalTokens"`
+	MissingUsage     int `json:"missingUsage"`
+}
+
+func (h *Hub) recordUsage(usage *schema.TokenUsage) {
+	h.metricsMu.Lock()
+	defer h.metricsMu.Unlock()
+	if usage == nil {
+		h.metrics.MissingUsage++
+		return
+	}
+	h.metrics.PromptTokens += usage.PromptTokens
+	h.metrics.CompletionTokens += usage.CompletionTokens
+	h.metrics.TotalTokens += usage.TotalTokens
+}
+
+func (h *Hub) recordActivity(delta int) {
+	h.metricsMu.Lock()
+	defer h.metricsMu.Unlock()
+	h.metrics.ActiveAgents += delta
+}
+
+func (h *Hub) snapshotMetrics() agentMetrics {
+	h.metricsMu.Lock()
+	defer h.metricsMu.Unlock()
+	return h.metrics
 }
 
 func NewHub(a Analyzer, s Scaffolder) *Hub { return &Hub{analyzer: a, scaffolder: s} }
@@ -96,10 +135,33 @@ type session struct {
 func (h *Hub) Serve(parent context.Context, conn Conn) {
 	ctx, cancel := context.WithCancel(parent)
 	s := &session{hub: h, conn: conn, ctx: ctx, inflight: map[string]context.CancelFunc{}}
+	usageDone := make(chan struct{})
+	usageStopped := make(chan struct{})
+	metrics := h.snapshotMetrics()
+	s.send("", "agent.usage", metrics)
+	go func() {
+		defer close(usageStopped)
+		ticker := time.NewTicker(usageInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				next := h.snapshotMetrics()
+				if next != metrics {
+					s.send("", "agent.usage", next)
+					metrics = next
+				}
+			case <-usageDone:
+				return
+			}
+		}
+	}()
 	defer func() {
+		close(usageDone)
 		cancel()
-		s.wg.Wait()
 		_ = conn.Close()
+		<-usageStopped
+		s.wg.Wait()
 	}()
 	for {
 		_, data, err := conn.ReadMessage()
@@ -118,13 +180,13 @@ func (h *Hub) Serve(parent context.Context, conn Conn) {
 func (s *session) send(id, typ string, payload any) {
 	b, err := json.Marshal(outbound{ID: id, Type: typ, Payload: payload})
 	if err != nil {
-		slog.Error("ws marshal", "type", typ, "err", err)
+		logging.From(s.ctx).Error("ws.marshal.failed", zap.String("request_id", id), zap.String("type", typ), zap.Error(err))
 		return
 	}
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
 	if err := s.conn.WriteMessage(textMessage, b); err != nil {
-		slog.Debug("ws write failed", "type", typ, "err", err)
+		logging.From(s.ctx).Warn("ws.write.failed", zap.String("request_id", id), zap.String("type", typ), zap.Error(err))
 	}
 }
 
@@ -135,7 +197,7 @@ func (s *session) sendError(id string, ae *apperr.Error) {
 func (s *session) fail(id string, err error) {
 	ae := apperr.From(err)
 	if ae.Code == apperr.Internal {
-		slog.Error("ws request failed", "id", id, "err", err)
+		logging.From(s.ctx).Error("ws.request.failed", zap.String("request_id", id), zap.Error(err))
 	}
 	s.sendError(id, ae)
 }
@@ -156,6 +218,7 @@ func (s *session) dispatch(env inbound) {
 		cancel := s.inflight[p.TargetID]
 		s.mu.Unlock()
 		if cancel != nil {
+			logging.From(s.ctx).Info("ws.cancel.requested", zap.String("request_id", p.TargetID))
 			cancel()
 		}
 	case "analyze.paragraphs", "analyze.article", "analyze.text", "scaffold.request":
@@ -170,7 +233,7 @@ func (s *session) start(env inbound) {
 		s.sendError("", apperr.New(apperr.BadRequest, "请求缺少 id"))
 		return
 	}
-	ctx, cancel := context.WithCancel(s.ctx)
+	ctx, cancel := context.WithTimeout(s.ctx, 3*time.Minute)
 	s.mu.Lock()
 	if _, dup := s.inflight[env.ID]; dup {
 		s.mu.Unlock()
@@ -190,7 +253,12 @@ func (s *session) start(env inbound) {
 			s.mu.Unlock()
 			cancel()
 		}()
-		if err := s.handle(ctx, env); err != nil {
+		ctx, finish := logging.Start(ctx, "ws.ai.request", zap.String("request_id", env.ID), zap.String("request_type", env.Type))
+		ctx = agent.WithUsageSink(ctx, s.hub.recordUsage)
+		ctx = agent.WithActivitySink(ctx, s.hub.recordActivity)
+		err := s.handle(ctx, env)
+		finish(err)
+		if err != nil {
 			if s.ctx.Err() != nil {
 				return
 			}
@@ -217,9 +285,12 @@ func (s *session) handle(ctx context.Context, env inbound) error {
 		if err != nil {
 			return err
 		}
-		return s.hub.analyzer.Paragraphs(ctx, p.ArticleID, p.ParagraphIDs, func(a analyzer.ParagraphAnalysis) {
+		if err := s.hub.analyzer.Paragraphs(ctx, p.ArticleID, p.ParagraphIDs, func(a analyzer.ParagraphAnalysis) {
 			s.send(env.ID, "analyze.result", a)
-		})
+		}); err != nil {
+			return err
+		}
+		s.send(env.ID, "analyze.done", struct{}{})
 	case "analyze.article":
 		p, err := decode[struct {
 			ArticleID int `json:"articleId"`

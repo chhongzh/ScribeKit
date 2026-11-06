@@ -12,6 +12,10 @@ func AnalyzerParagraph(v AnalyzerParagraphVars) ([]*schema.Message, error) {
 		part{schema.User, "analyzer/paragraph_user.jinja"})
 }
 
+func AnalyzerToolDescription() (string, error) {
+	return eng.render("analyzer/tool_submit_half.jinja", nil)
+}
+
 func AnalyzerArticle(v AnalyzerArticleVars) ([]*schema.Message, error) {
 	return eng.messages(v,
 		part{schema.System, "analyzer/article_system.jinja"},

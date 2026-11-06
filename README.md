@@ -33,6 +33,16 @@ cd web && bun install && bun run build && cd .. && go build ./cmd/scribekit
 
 配色：在设置页导入 material-theme-builder 导出的 JSON。描写类型的底色取 extended colors 中名为 `appearance` `speech` `action` `psychology` `expression` `environment` 的颜色。
 
+## AI 日志
+
+后端启动后通过 Zap 向标准错误输出 JSON 日志，不对 AI 日志采样。覆盖 WebSocket AI 请求、模型配置与构建缓存、连接测试、提示词渲染、Analyzer 并发等待与分析缓存、JSON 修复重试、Scaffolder 规划与建议保存/清理，以及 Eino 组件和工具调用。每次操作记录开始、结束、耗时、失败、取消或超时；流式响应记录片段数和输出字节数，模型提供用量时记录 Token 数。
+
+可用 `request_id` 关联一次 WebSocket 请求，`span_id` 区分具体操作。日志不输出 API Key、模型地址、完整提示词、文章正文或工具参数/结果正文；错误字段保留底层错误信息。提示词渲染日志只有模板名、耗时和输出字节数。
+
+Analyzer 单次分析（含排队和 JSON 修复重试）最多 90 秒，WebSocket AI 请求最多 3 分钟；前端在 190 秒未收到结束结果时释放状态并取消请求。分析中可点击“取消分析”。重复提交相同段落和文本会合并，关闭文章会取消它的在途分析。保存请求超过 30 秒会提示失败。
+
+界面使用 Vuetify 的 MD3 blueprint。正文默认以 100% 显示，可在状态栏调整到 75%–150%；缩放只改变稿面字号。
+
 ## 编辑器快捷键
 
 | 按键 | 作用 |
@@ -43,9 +53,15 @@ cd web && bun install && bun run build && cd .. && go build ./cmd/scribekit
 | Alt+Shift+↑/↓ | 移动段落（也可拖动装订线） |
 | Shift+Enter | 交给 Scaffolder：有 `[指令]` 按指令生成，光标前有未写完的半句则续写，否则打开命令面板 |
 | Ctrl+K / Ctrl+Space | 光标处命令面板 |
+| Ctrl+F / Ctrl+H | 查找 / 查找并替换；支持区分大小写与正则，全部替换可一次撤销 |
+| F11 | 全屏编辑 |
 | Ctrl+Enter | 段内换行（诗歌分行） |
 | Esc | 取消正在生成的建议 |
 | A / R / E | 评审视图中接受 / 拒绝 / 改写当前半句 |
+
+命令面板还提供“AI 重新整理全文段落类型”：先生成每段类型和理由的预览，确认后一次应用，Ctrl+Z 可撤销。写作命令点击后才展开配置。底部面板收起后可从状态栏的“问题”“输出”重新打开。状态栏每 500 毫秒接收后台实际运行的 Agent 数和服务商返回的 token 用量，累计范围为本次服务启动以来；服务商未返回用量时会明确提示，绝不按文本估算。
+
+梗概、总纲、素材内容等多行输入框右上角均可进入全屏编辑，按 Esc 或点击退出按钮返回，保留输入内容和光标位置。
 
 ## 许可
 

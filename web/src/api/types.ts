@@ -172,6 +172,7 @@ export interface Diagnostic {
 }
 
 export interface ParagraphAnalysis {
+  partial?: boolean
   paragraphId: number
   textHash: string
   segmentation: Segmentation
@@ -209,6 +210,7 @@ export type WsErrorCode =
   | 'needs_user_input'
   | 'user_owned_paragraph'
   | 'cancelled'
+  | 'timeout'
   | 'bad_request'
   | 'internal'
 

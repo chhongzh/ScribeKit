@@ -12,8 +12,10 @@ import (
 	"github.com/cloudwego/eino/components/model"
 
 	"github.com/chhongzh/scribekit/internal/apperr"
+	"github.com/chhongzh/scribekit/internal/logging"
 	"github.com/chhongzh/scribekit/internal/prompt"
 	"github.com/chhongzh/scribekit/internal/store"
+	"go.uber.org/zap"
 )
 
 type Role int
@@ -69,7 +71,9 @@ func modelFor(s store.Settings, role Role) string {
 }
 
 // For 返回角色对应的模型；设置里的 provider、地址、密钥或模型名变化后自动重建。
-func (m *Manager) For(ctx context.Context, role Role) (Handle, error) {
+func (m *Manager) For(ctx context.Context, role Role) (handle Handle, err error) {
+	ctx, finish := logging.Start(ctx, "model.resolve", zap.Int("model_role", int(role)))
+	defer func() { finish(err) }()
 	s, err := m.src.GetSettings(ctx)
 	if err != nil {
 		return Handle{}, err
@@ -83,8 +87,10 @@ func (m *Manager) For(ctx context.Context, role Role) (Handle, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if c, ok := m.cache[role]; ok && c.fingerprint == fp {
+		logging.From(ctx).Info("model.cache.hit", zap.String("model", name), zap.String("provider", s.Provider))
 		return c.handle, nil
 	}
+	logging.From(ctx).Info("model.cache.miss", zap.String("model", name), zap.String("provider", s.Provider))
 	cm, err := m.factory(ctx, s, name)
 	if err != nil {
 		return Handle{}, fmt.Errorf("构建模型失败: %w", err)
@@ -94,7 +100,9 @@ func (m *Manager) For(ctx context.Context, role Role) (Handle, error) {
 	return h, nil
 }
 
-func Build(ctx context.Context, s store.Settings, modelName string) (model.ToolCallingChatModel, error) {
+func Build(ctx context.Context, s store.Settings, modelName string) (cm model.ToolCallingChatModel, err error) {
+	ctx, finish := logging.Start(ctx, "model.build", zap.String("provider", s.Provider), zap.String("model", modelName))
+	defer func() { finish(err) }()
 	baseURL := strings.TrimSpace(s.BaseURL)
 	switch s.Provider {
 	case "claude":
@@ -111,7 +119,9 @@ func Build(ctx context.Context, s store.Settings, modelName string) (model.ToolC
 }
 
 // Test 对分析和生成两个模型各发一个极短请求，返回给设置页的结果。
-func (m *Manager) Test(ctx context.Context) (string, error) {
+func (m *Manager) Test(ctx context.Context) (result string, err error) {
+	ctx, finish := logging.Start(ctx, "model.test")
+	defer func() { finish(err) }()
 	probe, err := prompt.Probe()
 	if err != nil {
 		return "", err
@@ -124,9 +134,11 @@ func (m *Manager) Test(ctx context.Context) (string, error) {
 			return "", err
 		}
 		if seen[h.Name] {
+			logging.From(ctx).Info("model.probe.skipped", zap.String("model", h.Name))
 			continue
 		}
 		seen[h.Name] = true
+		logging.From(ctx).Info("model.probe.started", zap.String("model", h.Name))
 		msg, err := h.Model.Generate(ctx, probe, model.WithMaxTokens(16))
 		if err != nil {
 			return "", fmt.Errorf("模型 %s 请求失败: %w", h.Name, err)
@@ -135,6 +147,7 @@ func (m *Manager) Test(ctx context.Context) (string, error) {
 			return "", fmt.Errorf("模型 %s 没有返回内容", h.Name)
 		}
 		parts = append(parts, h.Name)
+		logging.From(ctx).Info("model.probe.completed", zap.String("model", h.Name), zap.Int("output_bytes", len(msg.Content)))
 	}
 	return "连接正常：" + strings.Join(parts, "、"), nil
 }

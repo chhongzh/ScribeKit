@@ -1,9 +1,7 @@
 import { argbFromHex, Blend, hexFromArgb, TonalPalette } from '@material/material-color-utilities'
 import type { DescKind } from '../api/types'
+import { vscodeDark, vscodeLight } from './vscode'
 
-// 配色只有两个来源：Vuetify 内置默认主题，或用户导入的 material-theme-builder 导出 JSON（SPEC §7）。
-// 这里把两者都整理成同一组 Vuetify 颜色键，组件里只用 rgb(var(--v-theme-xxx)) 引用。
-// 本文件不包含任何颜色字面值：颜色值只来自运行时读取的默认主题或用户文件。
 
 export type ColorMap = Record<string, string>
 export type VarMap = Record<string, string | number>
@@ -16,23 +14,6 @@ export interface ThemePair {
 /** 着色的六种描写类型（叙述、议论不上底色）。 */
 export const COLORED_DESC: DescKind[] = ['appearance', 'speech', 'action', 'psychology', 'expression', 'environment']
 
-/** 工作台三层表面：chrome = 活动栏与状态栏，panel = 侧边栏与底部面板，editor = 稿面。 */
-const DEFAULT_ALIASES: Record<string, string> = {
-  'sk-chrome': 'surface-light',
-  'sk-panel': 'surface',
-  'sk-editor': 'background',
-}
-
-/** 未导入主题时描写类型借用的默认主题角色。Vuetify 默认主题没有 MD3 的 container 角色，只能低透明度借用强调色。 */
-const DEFAULT_DESC_SOURCE: Record<string, string> = {
-  appearance: 'primary',
-  speech: 'secondary',
-  action: 'success',
-  psychology: 'error',
-  expression: 'warning',
-  environment: 'info',
-}
-
 function aliasColors(base: ColorMap, aliases: Record<string, string>): ColorMap {
   const out: ColorMap = {}
   for (const [key, from] of Object.entries(aliases)) {
@@ -42,19 +23,17 @@ function aliasColors(base: ColorMap, aliases: Record<string, string>): ColorMap 
   return out
 }
 
-/** 在 Vuetify 默认主题之上补齐本应用用到的颜色键。base 取自运行时的默认主题快照。 */
 export function defaultThemePair(base: { light: ColorMap; dark: ColorMap }): ThemePair {
-  const build = (colors: ColorMap, alpha: number) => {
-    const desc: ColorMap = {}
-    const variables: VarMap = {}
+  const build = (colors: ColorMap, palette: ColorMap, dark: boolean) => {
+    const variables: VarMap = { 'border-color': dark ? '#454545' : '#D4D4D4', 'border-opacity': 1 }
+    const out = { ...colors, ...palette }
     for (const k of COLORED_DESC) {
-      const v = colors[DEFAULT_DESC_SOURCE[k]!]
-      if (v) desc[`desc-${k}`] = v
-      variables[`sk-alpha-${k}`] = alpha
+      out[`on-desc-${k}`] = palette[`desc-${k}`]!
+      variables[`sk-alpha-${k}`] = 0
     }
-    return { colors: { ...colors, ...aliasColors(colors, DEFAULT_ALIASES), ...desc }, variables }
+    return { colors: out, variables }
   }
-  return { light: build(base.light, 0.16), dark: build(base.dark, 0.3) }
+  return { light: build(base.light, vscodeLight, false), dark: build(base.dark, vscodeDark, true) }
 }
 
 // ---------- material-theme-builder 导入 ----------
@@ -198,6 +177,7 @@ export function themeFromMtb(json: unknown): MtbResult {
         out[`desc-${k}`] = colors[fb.role]!
         variables[`sk-alpha-${k}`] = fb.alpha
       }
+      out[`on-desc-${k}`] = colors['on-surface']!
     }
     return { colors: out, variables }
   }

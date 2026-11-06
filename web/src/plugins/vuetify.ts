@@ -1,9 +1,11 @@
 import 'vuetify/styles'
 import { createVuetify } from 'vuetify'
+import { md3 } from 'vuetify/blueprints'
 import { aliases, mdi } from 'vuetify/iconsets/mdi-svg'
 import { zhHans } from 'vuetify/locale'
 
 export const vuetify = createVuetify({
+  blueprint: md3,
   icons: { defaultSet: 'mdi', aliases, sets: { mdi } },
   locale: { locale: 'zhHans', messages: { zhHans } },
   theme: {
@@ -12,8 +14,8 @@ export const vuetify = createVuetify({
     variations: false,
   },
   defaults: {
-    global: { ripple: false },
-    VBtn: { variant: 'text', rounded: 'sm' },
+    VBtn: { variant: 'text' },
+    VTab: { variant: 'text', rounded: 0 },
     VTextField: { variant: 'outlined', density: 'compact', hideDetails: 'auto' },
     VTextarea: { variant: 'outlined', density: 'compact', hideDetails: 'auto' },
     VSelect: { variant: 'outlined', density: 'compact', hideDetails: 'auto' },

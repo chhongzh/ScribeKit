@@ -5,6 +5,7 @@ import type { Genre } from '../../api/types'
 import { GENRES } from '../../core/labels'
 import { useEditorStore } from '../../stores/editor'
 import { useWorkspaceStore } from '../../stores/workspace'
+import ExpandableTextarea from '../ExpandableTextarea.vue'
 
 const props = defineProps<{ collectionId: number | null }>()
 const open = defineModel<boolean>({ required: true })
@@ -78,7 +79,7 @@ async function submit() {
           先写下标题和梗概。梗概可以很乱，它是你自己的草稿，也是 Scaffolder 理解你想说什么的唯一依据。
         </p>
         <v-text-field v-model="title" label="标题" autofocus />
-        <v-textarea v-model="synopsis" label="梗概" rows="4" auto-grow placeholder="想写什么、怎么开头、要落到哪个观点上，想到哪写到哪" />
+        <ExpandableTextarea v-model="synopsis" label="梗概" rows="4" auto-grow placeholder="想写什么、怎么开头、要落到哪个观点上，想到哪写到哪" />
         <div class="d-flex ga-3">
           <v-select v-model="genre" :items="GENRES" label="文体" class="flex-1-1" />
           <v-combobox v-model="subgenre" :items="subOptions" label="细分（可选）" class="flex-1-1" />

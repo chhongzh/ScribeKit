@@ -9,6 +9,7 @@ import type { ArticleSession } from '../../editor/session'
 import { useDialogStore } from '../../stores/dialogs'
 import { useSuggestionStore } from '../../stores/suggestions'
 import StateBlock from '../StateBlock.vue'
+import ExpandableTextarea from '../ExpandableTextarea.vue'
 
 // 建议评审：AI 生成整句，用户逐半句决定接受、拒绝或就地改写。全部决定后才能合入。
 
@@ -195,11 +196,12 @@ function locate() {
           @keydown="onRowKey($event, h, i)"
         >
           <div v-if="editing === h.index" class="sk-rv-edit">
-            <textarea
+            <ExpandableTextarea
               :id="`sk-rv-edit-${h.index}`"
               v-model="draft"
-              class="sk-rv-textarea"
-              rows="2"
+              label="改写这个半句"
+              :rows="2"
+              auto-grow
               aria-label="改写这个半句"
               @keydown.enter.exact.prevent="saveEdit(h)"
               @keydown.esc.prevent.stop="cancelEdit(h)"

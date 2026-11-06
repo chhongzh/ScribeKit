@@ -5,6 +5,7 @@ import { genreLabel } from '../../core/labels'
 import { useEditorStore } from '../../stores/editor'
 import { useWorkspaceStore } from '../../stores/workspace'
 import StateBlock from '../StateBlock.vue'
+import ExpandableTextarea from '../ExpandableTextarea.vue'
 
 // 文集总纲：整个文集共用的约束、风格、规则，Scaffolder 生成时会读取。
 
@@ -70,13 +71,15 @@ onBeforeUnmount(() => {
       <v-btn variant="outlined" size="small" @click="editor.openOutline(collectionId)">再试一次</v-btn>
     </StateBlock>
     <div v-else-if="detail" class="sk-outline">
-      <input v-model="name" class="sk-outline-name" aria-label="文集名称" placeholder="文集名称" />
+      <v-text-field v-model="name" label="文集名称" class="mb-4" aria-label="文集名称" />
       <p class="sk-muted text-body-2">
         总纲是这个文集里所有文章共用的约束：立意、人物设定、语言风格、不能写的东西。Scaffolder 为这个文集里的任何一篇生成内容时都会先读它。可以不写。
       </p>
-      <textarea
+      <ExpandableTextarea
         v-model="outline"
-        class="sk-outline-text"
+        label="总纲"
+        :rows="12"
+        auto-grow
         aria-label="总纲"
         placeholder="例如：主人公是初三学生，第一人称；语言朴素，不用华丽辞藻；每篇都要落到“成长要付出代价”上。"
       />

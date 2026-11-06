@@ -14,6 +14,7 @@ interface Layout {
   sidebarOpen: boolean
   inspectorOpen: boolean
   panelOpen: boolean
+  editorWidth: number
 }
 
 function load(): Layout {
@@ -24,10 +25,17 @@ function load(): Layout {
     sidebarOpen: true,
     inspectorOpen: true,
     panelOpen: true,
+    editorWidth: 880,
   }
   try {
     const raw = localStorage.getItem(KEY)
-    if (raw) return { ...d, ...(JSON.parse(raw) as Partial<Layout>) }
+    if (raw) {
+      const saved = JSON.parse(raw) as Partial<Layout>
+      const layout = { ...d, ...saved }
+      layout.inspectorOpen = d.inspectorOpen
+      layout.editorWidth = typeof saved.editorWidth === 'number' && Number.isFinite(saved.editorWidth) ? Math.max(560, Math.min(1600, saved.editorWidth)) : d.editorWidth
+      return layout
+    }
   } catch {
     // 布局偏好损坏时用默认值。
   }
@@ -41,6 +49,7 @@ export const useUiStore = defineStore('ui', () => {
   const inspectorTab = ref<InspectorTab>('suggestions')
   /** 当前在检查器里评审的建议 id。 */
   const reviewing = ref<number | null>(null)
+  const editorZoom = ref(100)
 
   watch(layout, (v) => localStorage.setItem(KEY, JSON.stringify(v)), { deep: true })
 
@@ -68,5 +77,5 @@ export const useUiStore = defineStore('ui', () => {
     openInspector('suggestions')
   }
 
-  return { layout, activity, panelTab, inspectorTab, reviewing, showActivity, openPanel, openInspector, review }
+  return { layout, activity, panelTab, inspectorTab, reviewing, editorZoom, showActivity, openPanel, openInspector, review }
 })

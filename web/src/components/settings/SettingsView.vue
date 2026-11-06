@@ -128,7 +128,7 @@ async function resetTheme() {
   themeBusy.value = true
   try {
     await store.save({ theme: null })
-    themeMsg.value = '已恢复 Vuetify 默认主题。'
+    themeMsg.value = '已恢复 VS Code 默认配色。'
   } catch (e) {
     themeMsg.value = `没有恢复：${describeError(e)}`
   } finally {
@@ -168,7 +168,7 @@ async function resetTheme() {
           <v-text-field v-model="form.scaffolderModel" label="Scaffolder 模型" />
           <v-switch v-model="form.autoAnalyze" label="停笔 1.2 秒后自动分析当前段落" />
         </div>
-        <div class="d-flex align-center ga-2 mt-4">
+        <div class="d-flex align-center flex-wrap ga-2">
           <v-btn color="primary" variant="flat" :disabled="!dirty" :loading="saving" @click="save">保存设置</v-btn>
           <v-btn variant="outlined" :loading="testing" @click="test">测试连通性</v-btn>
           <span v-if="testResult" :class="testResult.ok ? '' : 'text-error'" class="text-body-2" role="status">
@@ -179,7 +179,7 @@ async function resetTheme() {
 
       <section aria-labelledby="sk-set-theme">
         <h2 id="sk-set-theme">外观</h2>
-        <div class="d-flex align-center ga-4">
+        <div class="d-flex align-center flex-wrap ga-4">
           <span class="text-body-2">明暗</span>
           <v-btn-toggle
             :model-value="store.mode"
@@ -194,19 +194,19 @@ async function resetTheme() {
             <v-btn value="dark">暗色</v-btn>
           </v-btn-toggle>
         </div>
-        <p class="sk-muted text-body-2 mt-4">
-          配色从 Material Theme Builder 导入：在网页版里定好种子色，Export 选 JSON，把文件传到这里。
-          描写类型的底色读取文件里名为 appearance、speech、action、psychology、expression、environment 的 extended color，
+        <p class="sk-muted text-body-2">
+          默认配色参考 VS Code Light+ / Dark+。也可从 Material Theme Builder 导入：Export 选 JSON，把文件传到这里。
+          描写类型的高亮颜色读取文件里名为 appearance、speech、action、psychology、expression、environment 的 extended color，
           没有的按 Material 3 角色回退。
         </p>
         <input ref="themeFile" type="file" accept="application/json,.json" hidden @change="onThemeFile" />
-        <div class="d-flex align-center ga-2">
+        <div class="d-flex align-center flex-wrap ga-2">
           <v-btn variant="outlined" :loading="themeBusy" @click="pickTheme">导入主题 JSON</v-btn>
           <v-btn :disabled="!store.customTheme || themeBusy" @click="resetTheme">恢复默认主题</v-btn>
-          <span class="text-body-2 sk-muted">{{ store.customTheme ? '当前：导入的主题' : '当前：Vuetify 默认主题' }}</span>
+          <span class="text-body-2 sk-muted">{{ store.customTheme ? '当前：导入的主题' : '当前：VS Code 配色' }}</span>
         </div>
-        <p v-if="themeMsg" class="text-body-2 mt-2" role="status">{{ themeMsg }}</p>
-        <p v-if="store.themeError" class="text-body-2 text-error mt-2" role="alert">{{ store.themeError }}</p>
+        <p v-if="themeMsg" class="text-body-2" role="status">{{ themeMsg }}</p>
+        <p v-if="store.themeError" class="text-body-2 text-error" role="alert">{{ store.themeError }}</p>
       </section>
     </div>
   </div>
@@ -218,22 +218,24 @@ async function resetTheme() {
   overflow: auto;
 }
 .sk-settings {
-  max-width: 40em;
+  max-width: 720px;
   margin: 0 auto;
-  padding: 32px 32px 64px;
+  padding: 24px 24px 48px;
 }
 .sk-settings h1 {
   font-size: 22px;
-  margin: 0 0 16px;
+  margin: 0;
 }
 .sk-settings h2 {
   font-size: 15px;
-  margin: 28px 0 8px;
+  margin: 0;
 }
+.sk-settings section { display: flex; flex-direction: column; gap: 16px; margin-top: 24px; }
+.sk-settings p { margin: 0; line-height: 1.6; }
+.sk-settings :deep(.v-input__details) { padding-inline: 0; margin-top: 8px; }
 .sk-form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  margin-top: 12px;
+  gap: 16px;
 }
 </style>

@@ -104,6 +104,7 @@ const WS_ERRORS: Record<WsErrorCode, string> = {
   needs_user_input: '先写下标题和梗概，或在光标前写几个字，Scaffolder 才有东西可接。',
   user_owned_paragraph: '这一段由你亲自写：强制生成需要全文至少 300 字的正文作为上下文。',
   cancelled: '已取消。',
+  timeout: '模型响应超时，请重试或检查模型服务。',
   bad_request: '请求参数有误，后端拒绝了这次请求。',
   internal: '后端处理时出错。',
 }

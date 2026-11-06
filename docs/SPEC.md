@@ -183,7 +183,8 @@ Settings：
 
 | type | payload |
 |---|---|
-| `analyze.result` | `ParagraphAnalysis`（见 §6） |
+| `analyze.result` | `ParagraphAnalysis`（见 §6）；`partial: true` 为当前半句累计结果，请求在 `analyze.done` 后结束 |
+| `analyze.done` | `{}`，段落批次已完成；失败时以 `error` 结束 |
 | `analyze.articleResult` | `ArticleAnalysis` |
 | `analyze.textResult` | `ParagraphAnalysis`，paragraphId = 0 |
 | `scaffold.started` | `{suggestionId}` |
@@ -191,6 +192,8 @@ Settings：
 | `scaffold.done` | `Suggestion`（完整，status = pending） |
 | `error` | `{code, message}`，id 为出错请求的 id |
 | `pong` | `{}` |
+
+超时以 `error` 返回，错误码为 `timeout`。Analyzer 单次分析（包含并发排队和 JSON 修复）上限为 90 秒；WebSocket AI 请求总上限为 3 分钟。前端 190 秒未收到终态时释放请求并发送 `cancel`。
 
 错误码：`model_not_configured` `needs_user_input`（标题或梗概为空，或光标处没有用户文字可续写）`user_owned_paragraph`（转折段 / Call Back 段且未 force，此时 Scaffolder 自动降级为 advise，不报错；只有 force 但用户正文不足 300 字时才报此错）`cancelled` `bad_request` `internal`。
 
@@ -256,11 +259,11 @@ Analyzer 原则：只读不写，不生成任何可插入文本，不打分。`d
 - 描写类型 → 半句底色（取主题 extended color，见 §7）。
 - `theme` → 方框；`keyword` → 实线下划线；`repetition` → 波浪下划线；`pronoun` → 虚线下划线，悬停显示指代并高亮 `ref`；`callback` → 双下划线；`claim/evidence/reasoning` → 左侧装订线标记。
 - `relations` → 半句之间的箭头（悬停或开启“逻辑”图层时绘制 SVG 弧线），标注关系名。
-- `diagnostics` → 类似 LSP 的点状下划线 + Problems 面板。
+- `diagnostics` → 类似 LSP 的点状下划线 + Problems 面板。底部面板收起后由状态栏入口重新打开。
 
 ## 7. 配色
 
-前端禁止手写颜色值。主题来自 material-theme-builder 导出的 JSON（`schemes.light` / `schemes.dark` + `extendedColors`），在设置页导入，持久化到 Settings.theme。未导入时使用 Vuetify 内置默认主题。
+前端禁止手写颜色值。默认主题沿用 VS Code Light+ / Dark+ 的编辑器高亮角色；用户也可从 material-theme-builder 导出的 JSON（`schemes.light` / `schemes.dark` + `extendedColors`）导入，持久化到 Settings.theme。
 
 描写类型的颜色用 MTB 的 extended colors，名称约定：`appearance` `speech` `action` `psychology` `expression` `environment`。导入的 JSON 缺少某个 extended color 时，按以下 MD3 角色回退：appearance→primaryContainer，speech→secondaryContainer，action→tertiaryContainer，psychology→errorContainer，expression→surfaceVariant，environment→inversePrimary（低透明度）。
 
@@ -286,7 +289,8 @@ Scaffolder 按文章 genre 加载匹配的指引的“用于 Scaffolder”节，
 ## 9. Agent 调度（eino ADK）
 
 - `internal/llm` 根据 Settings 构建 `model.ToolCallingChatModel`：`claude` 走 eino-ext claude 组件，`openai` 走 eino-ext openai 组件（兼容任意 OpenAI 协议服务，baseUrl 可配）。设置变更后重建。
-- Analyzer：`adk.ChatModelAgent`，无工具，要求严格 JSON 输出，后端解析失败时重试一次；按 (paragraphId, textHash, model) 缓存。并发上限 3。
+- Analyzer：`adk.ChatModelAgent` 使用 `submit_half` 工具逐半句提交结构化结果；工具校验原文偏移和枚举，返回 remaining 引导模型继续，最后一个半句提交后立即结束，不再生成整段 JSON。每次工具提交都会按顺序推送当前累计的 `analyze.result`（`partial: true`），前端即时高亮；部分结果不作为完整缓存，也不结束请求。最终结果按 (paragraphId, textHash, model) 缓存。并发上限 3。
+- `agent.usage` 是无请求 ID 的全局状态快照：`activeAgents`、`promptTokens`、`completionTokens`、`totalTokens`、`missingUsage`。连接时立即推送，之后每 100 毫秒合并推送有变化的状态；用量在本次服务启动期间累计，重新连接不会重复累计。Analyzer 和 Scaffolder 在接入用量统计时均使用模型 stream；每收到一帧 usage 就计算该轮累计字段的增量，立即记账，不等读取循环或 agent loop 结束，重复帧不重复累计。未返回 usage 的响应单独计数，不估算；服务商仅在末尾返回 usage 时，该轮用量只能在末尾更新。Agent 运行数在实际进入/退出 agent loop 时增减，排队请求不计入。
 - Scaffolder：`adk.ChatModelAgent`，工具：`read_article`（当前文章全部段落）、`list_collection`（同文集其他文章的标题、梗概、开头片段）、`read_article_by_id`、`search_materials`（关键词 bigram 重叠排序，返回片段）、`read_outline`、`read_guide`。流式输出最终文本，通过 `scaffold.delta` 推送。最终回答格式：正文与 `<rationale>...</rationale>` 分开，后端拆分。
 - 每个 WS 请求绑定 context，`cancel` 或连接断开时取消。
 - 生成前置检查：标题和梗概都非空，否则 `needs_user_input`。`complete` 模式要求光标前有用户文字。

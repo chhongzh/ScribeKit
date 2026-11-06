@@ -19,20 +19,16 @@ const tabs: { id: InspectorTab; label: string }[] = [
 
 <template>
   <aside class="sk-inspector bg-sk-panel" aria-label="检查器">
-    <div class="sk-insp-tabs" role="tablist">
-      <button
+    <div class="sk-insp-tabs">
+      <v-tabs v-model="ui.inspectorTab" density="comfortable" color="primary" class="flex-grow-1" aria-label="检查器视图">
+      <v-tab
         v-for="t in tabs"
         :key="t.id"
-        type="button"
-        role="tab"
-        class="sk-itab"
-        :class="{ 'sk-itab-on': ui.inspectorTab === t.id }"
-        :aria-selected="ui.inspectorTab === t.id"
-        @click="ui.inspectorTab = t.id"
+        :value="t.id"
       >
         {{ t.label }}
-      </button>
-      <span class="sk-fill" />
+      </v-tab>
+      </v-tabs>
       <v-btn :icon="mdiChevronRight" size="x-small" density="comfortable" aria-label="收起检查器（Ctrl+Alt+B）" title="收起（Ctrl+Alt+B）" @click="ui.layout.inspectorOpen = false" />
     </div>
     <div class="sk-insp-body" role="tabpanel">
@@ -57,7 +53,7 @@ const tabs: { id: InspectorTab; label: string }[] = [
   flex: none;
   display: flex;
   align-items: center;
-  height: 36px;
+  min-height: 48px;
   padding: 0 4px 0 6px;
   border-bottom: 1px solid var(--sk-line);
 }

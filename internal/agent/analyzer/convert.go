@@ -44,31 +44,26 @@ type rawRef struct {
 }
 
 type rawParagraph struct {
-	Halves []struct {
-		Index    int      `json:"index"`
-		Desc     []string `json:"desc"`
-		Rhetoric []string `json:"rhetoric"`
-	} `json:"halves"`
-	Relations []struct {
-		From int    `json:"from"`
-		To   int    `json:"to"`
-		Kind string `json:"kind"`
-		Note string `json:"note"`
-	} `json:"relations"`
-	Marks []struct {
-		Half int     `json:"half"`
-		Text string  `json:"text"`
-		Nth  int     `json:"nth"`
-		Kind string  `json:"kind"`
-		Note string  `json:"note"`
-		Ref  *rawRef `json:"ref"`
-	} `json:"marks"`
-	Diagnostics []struct {
-		Half     int    `json:"half"`
-		Text     string `json:"text"`
-		Severity string `json:"severity"`
-		Message  string `json:"message"`
-	} `json:"diagnostics"`
+	Halves      []HalfInfo      `json:"halves"`
+	Relations   []Relation      `json:"relations"`
+	Marks       []rawMark       `json:"marks"`
+	Diagnostics []rawDiagnostic `json:"diagnostics"`
+}
+
+type rawMark struct {
+	Half int     `json:"half"`
+	Text string  `json:"text"`
+	Nth  int     `json:"nth,omitempty"`
+	Kind string  `json:"kind"`
+	Note string  `json:"note,omitempty"`
+	Ref  *rawRef `json:"ref,omitempty"`
+}
+
+type rawDiagnostic struct {
+	Half     int    `json:"half"`
+	Text     string `json:"text,omitempty"`
+	Severity string `json:"severity"`
+	Message  string `json:"message"`
 }
 
 func parseParagraph(output string) (*rawParagraph, error) {

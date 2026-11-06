@@ -70,19 +70,14 @@ onMounted(() => {
       <v-btn variant="outlined" size="small" @click="genre = null">看全部指引</v-btn>
     </StateBlock>
 
-    <ul v-else class="sk-guide-list">
-      <li v-for="g in filtered" :key="g.id">
-        <button
-          type="button"
-          class="sk-guide"
-          :class="{ 'sk-guide-active': editor.activeTab?.type === 'guide' && editor.activeTab.id === g.id }"
+    <v-list v-else aria-label="写作指引">
+        <v-list-item v-for="g in filtered" :key="g.id"
+          :active="editor.activeTab?.type === 'guide' && editor.activeTab.id === g.id"
+          :title="g.title"
+          :subtitle="g.genres.map(genreLabel).join('、')"
           @click="editor.openGuide(g.id)"
-        >
-          <span class="sk-guide-title">{{ g.title }}</span>
-          <span class="sk-muted text-caption">{{ g.genres.map(genreLabel).join('、') }}</span>
-        </button>
-      </li>
-    </ul>
+        />
+    </v-list>
   </div>
 </template>
 

@@ -80,27 +80,15 @@ watch(
 
 <template>
   <section class="sk-bottom bg-sk-panel" aria-label="底部面板">
-    <div class="sk-bottom-tabs" role="tablist">
-      <button
-        type="button"
-        role="tab"
-        class="sk-btab"
-        :class="{ 'sk-btab-on': ui.panelTab === 'problems' }"
-        :aria-selected="ui.panelTab === 'problems'"
-        @click="ui.panelTab = 'problems'"
-      >
+    <div class="sk-bottom-tabs">
+      <v-tabs v-model="ui.panelTab" density="comfortable" color="primary" aria-label="底部面板视图">
+      <v-tab value="problems">
         问题<span v-if="problems.length" class="sk-count">{{ problems.length }}</span>
-      </button>
-      <button
-        type="button"
-        role="tab"
-        class="sk-btab"
-        :class="{ 'sk-btab-on': ui.panelTab === 'output' }"
-        :aria-selected="ui.panelTab === 'output'"
-        @click="ui.panelTab = 'output'"
-      >
+      </v-tab>
+      <v-tab value="output">
         输出
-      </button>
+      </v-tab>
+      </v-tabs>
       <span class="sk-fill" />
       <v-btn
         v-if="ui.panelTab === 'output'"
@@ -158,7 +146,7 @@ watch(
   flex: none;
   display: flex;
   align-items: center;
-  height: 32px;
+  min-height: 48px;
   padding: 0 4px 0 8px;
 }
 .sk-btab {

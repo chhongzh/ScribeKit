@@ -21,6 +21,7 @@ import { useWorkspaceStore } from '../../stores/workspace'
 import PanelHeader from '../PanelHeader.vue'
 import StateBlock from '../StateBlock.vue'
 import NewArticleDialog from './NewArticleDialog.vue'
+import ContextMenu, { type ContextAction } from '../ContextMenu.vue'
 
 const workspace = useWorkspaceStore()
 const editor = useEditorStore()
@@ -31,6 +32,53 @@ const expanded = reactive<Record<number, boolean>>({})
 const looseOpen = ref(true)
 const newArticleOpen = ref(false)
 const newArticleCollection = ref<number | null>(null)
+const contextOpen = ref(false)
+const contextAt = ref<[number, number]>([0, 0])
+const contextArticle = ref<ArticleSummary | null>(null)
+const contextCollection = ref<Collection | null>(null)
+let contextOrigin: HTMLElement | null = null
+
+const contextActions = computed<ContextAction[]>(() => {
+  const article = contextArticle.value
+  const collection = contextCollection.value
+  if (article) return [
+    { title: '打开文章', run: () => { void editor.openArticle(article.id) } },
+    { title: '重命名', run: () => { void renameArticle(article) } },
+    { title: '导出 Markdown', run: () => doExport(article, 'md') },
+    { title: '导出 Word', run: () => doExport(article, 'docx') },
+    ...workspace.collections.filter((item) => item.id !== article.collectionId).map((item) => ({ title: `移入文集“${item.name}”`, run: () => { void moveArticle(article, item.id) } })),
+    ...(article.collectionId !== null ? [{ title: '移出文集（变成散篇）', run: () => { void moveArticle(article, null) } }] : []),
+    { title: '删除文章', danger: true, run: () => { void deleteArticle(article) } },
+  ]
+  if (collection) return [
+    { title: '打开总纲', run: () => { void editor.openOutline(collection.id) } },
+    { title: '在此新建文章', run: () => newArticle(collection.id) },
+    { title: '重命名', run: () => { void renameCollection(collection) } },
+    { title: '删除文集', danger: true, run: () => { void deleteCollection(collection) } },
+  ]
+  return [
+    { title: '新建散篇文章', run: () => newArticle(null) },
+    { title: '新建文集', run: () => { void newCollection() } },
+    { title: '刷新', run: () => { void workspace.refresh() } },
+  ]
+})
+
+function openContext(event: MouseEvent | KeyboardEvent) {
+  const target = event.target as HTMLElement | null
+  const row = target?.closest<HTMLElement>('[data-article-id], [data-collection-id]')
+  contextArticle.value = row?.dataset.articleId ? workspace.findSummary(Number(row.dataset.articleId)) ?? null : null
+  contextCollection.value = row?.dataset.collectionId ? workspace.collections.find((item) => item.id === Number(row.dataset.collectionId)) ?? null : null
+  contextOrigin = target?.closest<HTMLElement>('.v-list-item, button') ?? null
+  const rect = target?.getBoundingClientRect()
+  contextAt.value = event instanceof MouseEvent ? [event.clientX, event.clientY] : [rect?.left ?? 0, rect?.bottom ?? 0]
+  event.preventDefault()
+  event.stopPropagation()
+  contextOpen.value = true
+}
+
+function restoreContextFocus() {
+  if (!document.querySelector('.v-overlay--active')) contextOrigin?.focus()
+}
 
 const empty = computed(() => workspace.loaded && workspace.collections.length === 0 && workspace.loose.length === 0)
 const activeArticle = computed(() => (editor.activeTab?.type === 'article' ? editor.activeTab.id : null))
@@ -128,8 +176,12 @@ function doExport(a: ArticleSummary, format: 'md' | 'docx') {
 
 /** 方向键在树节点间移动焦点。 */
 function onTreeKey(e: KeyboardEvent) {
+  if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+    openContext(e)
+    return
+  }
   if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
-  const rows = Array.from((e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('.sk-row-main'))
+  const rows = Array.from((e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('.v-list-item'))
   const i = rows.indexOf(document.activeElement as HTMLElement)
   const next = rows[e.key === 'ArrowDown' ? i + 1 : i - 1]
   if (next) {
@@ -140,7 +192,7 @@ function onTreeKey(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="sk-explorer">
+  <div class="sk-explorer" @contextmenu="openContext">
     <PanelHeader title="资源管理器">
       <v-btn :icon="mdiFilePlusOutline" size="small" density="comfortable" aria-label="新建散篇文章" title="新建文章（散篇）" @click="newArticle(null)" />
       <v-btn :icon="mdiFolderPlusOutline" size="small" density="comfortable" aria-label="新建文集" title="新建文集" @click="newCollection" />
@@ -164,13 +216,10 @@ function onTreeKey(e: KeyboardEvent) {
       <p v-if="workspace.error" class="text-error text-caption px-3" role="alert">刷新失败：{{ workspace.error }}</p>
 
       <div v-for="c in workspace.collections" :key="c.id" role="treeitem" :aria-expanded="isOpen(c)">
-        <div class="sk-row">
-          <button type="button" class="sk-row-main" @click="expanded[c.id] = !isOpen(c)">
-            <v-icon :icon="isOpen(c) ? mdiChevronDown : mdiChevronRight" size="16" />
-            <v-icon :icon="mdiFolderOutline" size="16" />
-            <span class="sk-row-label">{{ c.name }}</span>
-            <span class="sk-row-meta">{{ (workspace.articlesByCollection[c.id] ?? []).length }}</span>
-          </button>
+        <div class="sk-row" :data-collection-id="c.id">
+          <v-list-item class="flex-grow-1" :title="c.name" :prepend-icon="isOpen(c) ? mdiChevronDown : mdiChevronRight" @click="expanded[c.id] = !isOpen(c)">
+            <template #append><v-badge inline :content="(workspace.articlesByCollection[c.id] ?? []).length" /></template>
+          </v-list-item>
           <v-menu location="bottom end">
             <template #activator="{ props: mp }">
               <v-btn v-bind="mp" :icon="mdiDotsHorizontal" size="x-small" density="comfortable" :aria-label="`文集“${c.name}”的操作`" />
@@ -184,20 +233,16 @@ function onTreeKey(e: KeyboardEvent) {
           </v-menu>
         </div>
         <div v-if="isOpen(c)" role="group">
-          <button type="button" class="sk-row-main sk-indent sk-outline-row" @click="editor.openOutline(c.id)">
-            <span class="sk-row-label">总纲</span>
-          </button>
-          <div v-for="a in workspace.articlesByCollection[c.id] ?? []" :key="a.id" class="sk-row" role="treeitem">
-            <button
-              type="button"
-              class="sk-row-main sk-indent"
-              :class="{ 'sk-row-active': activeArticle === a.id }"
+          <v-list-item class="pl-8" title="总纲" @click="editor.openOutline(c.id)" />
+          <div v-for="a in workspace.articlesByCollection[c.id] ?? []" :key="a.id" class="sk-row" role="treeitem" :data-article-id="a.id">
+            <v-list-item
+              class="flex-grow-1 pl-8"
+              :active="activeArticle === a.id"
+              :title="a.title || '未命名'"
+              :subtitle="`${genreLabel(a.genre)} · ${a.charCount} 字`"
+              :prepend-icon="mdiFileDocumentOutline"
               @click="editor.openArticle(a.id)"
-            >
-              <v-icon :icon="mdiFileDocumentOutline" size="16" />
-              <span class="sk-row-label">{{ a.title || '未命名' }}</span>
-              <span class="sk-row-meta">{{ genreLabel(a.genre) }} · {{ a.charCount }} 字</span>
-            </button>
+            />
             <v-menu location="bottom end">
               <template #activator="{ props: mp }">
                 <v-btn v-bind="mp" :icon="mdiDotsHorizontal" size="x-small" density="comfortable" :aria-label="`文章“${a.title}”的操作`" />
@@ -219,24 +264,20 @@ function onTreeKey(e: KeyboardEvent) {
 
       <div role="treeitem" :aria-expanded="looseOpen">
         <div class="sk-row">
-          <button type="button" class="sk-row-main" @click="looseOpen = !looseOpen">
-            <v-icon :icon="looseOpen ? mdiChevronDown : mdiChevronRight" size="16" />
-            <span class="sk-row-label">散篇</span>
-            <span class="sk-row-meta">{{ workspace.loose.length }}</span>
-          </button>
+          <v-list-item class="flex-grow-1" title="散篇" :prepend-icon="looseOpen ? mdiChevronDown : mdiChevronRight" @click="looseOpen = !looseOpen">
+            <template #append><v-badge inline :content="workspace.loose.length" /></template>
+          </v-list-item>
         </div>
         <div v-if="looseOpen" role="group">
-          <div v-for="a in workspace.loose" :key="a.id" class="sk-row" role="treeitem">
-            <button
-              type="button"
-              class="sk-row-main sk-indent"
-              :class="{ 'sk-row-active': activeArticle === a.id }"
+          <div v-for="a in workspace.loose" :key="a.id" class="sk-row" role="treeitem" :data-article-id="a.id">
+            <v-list-item
+              class="flex-grow-1 pl-8"
+              :active="activeArticle === a.id"
+              :title="a.title || '未命名'"
+              :subtitle="`${genreLabel(a.genre)} · ${a.charCount} 字`"
+              :prepend-icon="mdiFileDocumentOutline"
               @click="editor.openArticle(a.id)"
-            >
-              <v-icon :icon="mdiFileDocumentOutline" size="16" />
-              <span class="sk-row-label">{{ a.title || '未命名' }}</span>
-              <span class="sk-row-meta">{{ genreLabel(a.genre) }} · {{ a.charCount }} 字</span>
-            </button>
+            />
             <v-menu location="bottom end">
               <template #activator="{ props: mp }">
                 <v-btn v-bind="mp" :icon="mdiDotsHorizontal" size="x-small" density="comfortable" :aria-label="`文章“${a.title}”的操作`" />
@@ -261,6 +302,7 @@ function onTreeKey(e: KeyboardEvent) {
     </div>
 
     <NewArticleDialog v-model="newArticleOpen" :collection-id="newArticleCollection" />
+    <ContextMenu v-model="contextOpen" :at="contextAt" label="资源操作" :actions="contextActions" @closed="restoreContextFocus" />
   </div>
 </template>
 

@@ -1,9 +1,9 @@
 import { baseKeymap } from 'prosemirror-commands'
-import { history, redo, undo } from 'prosemirror-history'
-import { keymap } from 'prosemirror-keymap'
+import { closeHistory, history, redo, undo } from 'prosemirror-history'
+import { keydownHandler, keymap } from 'prosemirror-keymap'
 import type { Node as PMNode } from 'prosemirror-model'
-import { EditorState, Plugin, PluginKey, TextSelection, type Transaction } from 'prosemirror-state'
-import { DecorationSet, EditorView } from 'prosemirror-view'
+import { AllSelection, EditorState, Plugin, PluginKey, TextSelection, type Command, type Transaction } from 'prosemirror-state'
+import { Decoration, DecorationSet, EditorView } from 'prosemirror-view'
 import { reactive, shallowReactive } from 'vue'
 import type { Article, ArticleDetail, Paragraph, ParagraphKind, ParagraphAnalysis } from '../api/types'
 import { textHash } from '../core/hash'
@@ -16,6 +16,7 @@ import { ParagraphView } from './nodeview'
 import type { LocalRow, ServerRow } from './plan'
 import { keyForId, makeParagraph, newKey, schema } from './schema'
 import { SyncEngine } from './sync'
+import type { SearchMatch } from './search'
 
 // 一篇打开的文章：ProseMirror 状态 + 同步引擎 + 编辑器 UI 状态。
 // 标签页切走时 session 保留（撤销历史也保留），关闭标签页才销毁。
@@ -40,6 +41,8 @@ export interface SessionCallbacks {
   onShiftEnter(): void
   onEscape(): boolean
   onTextEdited(keys: string[]): void
+  onContextMenu?(at: [number, number]): void
+  onSearch?(replace: boolean): void
 }
 
 const decoKey = new PluginKey<DecorationSet>('sk-deco')
@@ -80,6 +83,11 @@ export class ArticleSession {
   view: EditorView | null = null
   private state: EditorState
   private cb: SessionCallbacks | null = null
+  private shortcutHandler: ReturnType<typeof keydownHandler> | null = null
+  searchMatches: SearchMatch[] = []
+  searchActive = -1
+  retryMetadata: (() => Promise<void>) | null = null
+  readonly metadataSave = reactive({ status: 'idle' as 'idle' | 'saving' | 'error', error: '' })
 
   /** 编辑器外部数据（分析、建议）由 store 注入。 */
   analysisLookup: (id: number) => ParagraphAnalysis | undefined = () => undefined
@@ -113,7 +121,7 @@ export class ArticleSession {
       doc: docFrom(paragraphs),
       plugins: [
         history(),
-        keymap({
+        this.keymap({
           Enter: enterCommand,
           'Shift-Enter': () => {
             this.cb?.onShiftEnter()
@@ -151,9 +159,12 @@ export class ArticleSession {
           'Mod-z': undo,
           'Mod-y': redo,
           'Shift-Mod-z': redo,
+          'Shift-F10': () => this.openContextMenu(),
+          ContextMenu: () => this.openContextMenu(),
         }),
         keymap(baseKeymap),
         keyNormalizer,
+        new Plugin({ props: { decorations: (state) => DecorationSet.create(state.doc, this.searchMatches.filter((match) => match.to <= state.doc.content.size).map((match, index) => Decoration.inline(match.from, match.to, { class: index === this.searchActive ? 'sk-search-current' : 'sk-search-match' }))) } }),
         new Plugin<DecorationSet>({
           key: decoKey,
           state: {
@@ -173,6 +184,96 @@ export class ArticleSession {
   }
 
   // ---------- 读取 ----------
+
+  private keymap(bindings: Record<string, Command>): Plugin {
+    this.shortcutHandler = keydownHandler(bindings)
+    return keymap(bindings)
+  }
+
+  handleShortcut(event: KeyboardEvent): boolean {
+    return !!this.view && !this.view.composing && !event.isComposing && event.keyCode !== 229 && !!this.shortcutHandler?.(this.view, event)
+  }
+
+  openPalette(): void {
+    this.focus()
+    this.cb?.onPalette()
+  }
+
+  openSearch(replace = false): void { this.cb?.onSearch?.(replace) }
+
+  showSearch(matches: SearchMatch[], active: number, reveal = false): void {
+    this.searchMatches = matches
+    this.searchActive = active
+    const view = this.view
+    if (!view) return
+    let transaction = view.state.tr.setMeta(REFRESH, true)
+    const match = matches[active]
+    if (reveal && match) transaction = transaction.setSelection(TextSelection.create(view.state.doc, match.from, match.to)).scrollIntoView()
+    view.dispatch(transaction)
+  }
+
+  replaceMatches(matches: SearchMatch[]): void {
+    const view = this.view
+    if (!view || !matches.length) return
+    let transaction = closeHistory(view.state.tr)
+    for (const match of [...matches].sort((left, right) => right.from - left.from)) transaction = transaction.insertText(match.replacement, match.from, match.to)
+    this.searchMatches = []
+    view.dispatch(transaction.scrollIntoView())
+  }
+
+  applyKinds(kinds: Map<string, ParagraphKind>): void {
+    const view = this.view
+    if (!view) return
+    let transaction = closeHistory(view.state.tr)
+    view.state.doc.forEach((node, position) => {
+      const kind = kinds.get(node.attrs.key as string)
+      if (kind && kind !== node.attrs.kind) transaction = transaction.setNodeMarkup(position, undefined, { ...node.attrs, kind })
+    })
+    if (transaction.docChanged) view.dispatch(transaction)
+  }
+
+  private openContextMenu(at?: [number, number]): boolean {
+    if (!this.cb?.onContextMenu) return false
+    const coords = this.caretCoords()
+    this.cb.onContextMenu(at ?? [coords?.left ?? 0, coords?.bottom ?? 0])
+    return true
+  }
+
+  get hasSelection(): boolean {
+    return !!this.view && !this.view.state.selection.empty
+  }
+
+  canUndo(): boolean { return !!this.view && undo(this.view.state) }
+  canRedo(): boolean { return !!this.view && redo(this.view.state) }
+  undo(): void { if (this.view) undo(this.view.state, this.view.dispatch) }
+  redo(): void { if (this.view) redo(this.view.state, this.view.dispatch) }
+
+  selectAll(): void {
+    if (this.view) this.view.dispatch(this.view.state.tr.setSelection(new AllSelection(this.view.state.doc)))
+    this.focus()
+  }
+
+  async copySelection(cut = false): Promise<void> {
+    const view = this.view
+    if (!view || view.state.selection.empty) return
+    const { doc, selection } = view.state
+    await navigator.clipboard.writeText(doc.textBetween(selection.from, selection.to, '\n', '\n'))
+    if (cut) {
+      if (view.isDestroyed || view.state.doc !== doc || !view.state.selection.eq(selection)) throw new Error('选区已变化，请重新剪切')
+      view.dispatch(view.state.tr.deleteSelection().scrollIntoView())
+    }
+    this.focus()
+  }
+
+  async pasteText(): Promise<void> {
+    const view = this.view
+    if (!view) return
+    const { doc, selection } = view.state
+    const text = await navigator.clipboard.readText()
+    if (view.isDestroyed || view.state.doc !== doc || !view.state.selection.eq(selection)) throw new Error('选区已变化，请重新粘贴')
+    view.pasteText(text)
+    this.focus()
+  }
 
   get doc(): PMNode {
     return this.view?.state.doc ?? this.state.doc
@@ -261,6 +362,22 @@ export class ArticleSession {
       },
       dispatchTransaction: (tr) => this.dispatch(tr),
       handleDOMEvents: {
+        contextmenu: (view, event) => {
+          const paragraph = (event.target as HTMLElement | null)?.closest<HTMLElement>('.sk-para')
+          const key = paragraph?.dataset.key
+          if (!key || !this.cb?.onContextMenu) return false
+          const found = this.find(key)
+          if (!found) return false
+          const hit = view.posAtCoords({ left: event.clientX, top: event.clientY })
+          const position = hit && hit.pos > found.pos && hit.pos < found.pos + found.node.nodeSize
+            ? hit.pos : found.pos + 1
+          const selection = view.state.selection
+          if (selection.empty || position < selection.from || position > selection.to) {
+            view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, position)))
+          }
+          event.preventDefault()
+          return this.openContextMenu([event.clientX, event.clientY])
+        },
         dragover: (_v, ev) => this.dragOver(ev),
         drop: (_v, ev) => this.dropOn(ev),
         mousemove: (_v, ev) => {

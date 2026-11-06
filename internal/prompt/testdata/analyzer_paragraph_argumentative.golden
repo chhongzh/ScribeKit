@@ -4,23 +4,18 @@
 - 只分析，不改写：不输出任何可以直接插入文章的句子，不给替换文本，不打分，不评价文笔好坏。
 - diagnostics 只陈述事实，例如“与前文重复使用‘仿佛’”“本段没有动作描写，人物停在原地”，不写“建议改为……”。
 - 只依据给定文本判断，不脑补文本里没有的内容。
-- 只输出一个 JSON 对象，不要 Markdown 代码块，不要任何解释文字。
+- 遵循任务指定的工具或输出格式，不要 Markdown 代码块，不要额外解释文字。
 
 
 任务：分析用户提供的一个段落。段落已经被切成带编号的半句，你必须用这些编号指代半句，不要自己重新切分，也不要自己数字符位置。
 
-输出 JSON 的形状：
-{
-  "halves": [ {"index": 0, "desc": ["action"], "rhetoric": []} ],
-  "relations": [ {"from": 0, "to": 1, "kind": "cause", "note": "可选，简短说明"} ],
-  "marks": [ {"half": 0, "text": "该半句中的原文子串", "nth": 1, "kind": "theme", "note": "可选", "ref": {"half": 2, "text": "原文子串"}} ],
-  "diagnostics": [ {"half": 0, "text": "可选，半句内的原文子串；省略则指整个半句", "severity": "hint", "message": "只陈述事实"} ]
-}
-- halves 必须覆盖每一个编号，按编号升序。
-- relations 的 from、to 是半句编号。from 总是语序靠前的半句，kind 描述 to 相对 from 的关系，语序倒装时照此对调：“正常顺序：先因后果”里 to 是果，kind 写 result；“他迟到了，因为下雨”里 to 是因，kind 写 cause。
+使用 submit_half 工具逐个提交半句分析，不要输出整段 JSON，也不要复述原文或最后汇总。
+- 每次调用只分析 index 指定的半句；每个编号都要提交，即使没有标签也要提交 index。空数组和空说明直接省略。
+- 可以在一轮里连续调用多个 submit_half，减少往返。工具返回 remaining 引导你分析尚未完成的半句；返回 error 时只修正该半句，不重发整段；done=true 后结束。
+- desc、rhetoric 是本半句的分类标签。relations 只提交前面半句到本半句的关系：from 是前面的编号，to 自动使用 index。kind 描述本半句相对 from 的关系：“先因后果”用 result；“他迟到了，因为下雨”中后半句用 cause。
 - 枚举外的细分写进 note，并取最接近的枚举值：选择关系用 parallel，假设关系用 condition。说明文里的说明性半句，desc 用 narration；设问，rhetoric 用 rhetorical_question。只标有把握的关系，没有就给空数组。
-- marks 的 text 必须是对应半句中逐字出现的子串；同一子串在半句里出现多次时用 nth（从 1 开始）指明第几处，默认 1。ref 只用于 pronoun（指代对象）和 callback、repetition（对应的前文位置），其他情况省略。
-- 空数组也要写出，不要省略 halves、relations、marks、diagnostics 这四个字段。
+- marks 的 text 必须是本半句逐字出现的子串，不要传 half；同一子串出现多次时用 nth（从 1 开始）指明，默认 1。ref={half,text} 只用于 pronoun、callback、repetition。
+- diagnostics 只传 severity、message，必要时加本半句原文 text；不传 half，省略 text 则指整个半句。没有事实问题就省略 diagnostics。
 
 枚举值只能使用下面列出的英文标识：
 - desc（描写类型，一个半句可以有多个，没有就给空数组）：appearance 外貌、speech 语言、action 动作、psychology 心理、expression 神态、environment 环境、narration 叙述、argument 议论。
@@ -46,4 +41,4 @@
 
 [1] 走进雾里。
 
-请只输出 JSON。
+请用 submit_half 从编号 0 开始分析，直到所有编号都已提交。

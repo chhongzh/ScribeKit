@@ -47,53 +47,29 @@ async function close(t: Tab) {
   if (discard) await editor.close(t, true)
 }
 
-function onTabKey(e: KeyboardEvent, i: number) {
-  const n = editor.tabs.length
-  let j = -1
-  if (e.key === 'ArrowRight') j = (i + 1) % n
-  else if (e.key === 'ArrowLeft') j = (i - 1 + n) % n
-  else if (e.key === 'Delete') {
-    e.preventDefault()
-    void close(editor.tabs[i]!)
-    return
-  } else return
-  e.preventDefault()
-  const t = editor.tabs[j]!
-  editor.activate(t)
-  ;(document.getElementById(`sk-tab-${tabKey(t)}`) as HTMLElement | null)?.focus()
-}
-
 const hasTabs = computed(() => editor.tabs.length > 0)
 </script>
 
 <template>
   <section class="sk-editor-area bg-sk-editor" aria-label="编辑器">
-    <div v-if="hasTabs" class="sk-tabs bg-sk-panel" role="tablist" aria-label="打开的标签页">
-      <div
-        v-for="(t, i) in editor.tabs"
+    <v-tabs v-if="hasTabs" :model-value="editor.active" class="bg-sk-panel" color="primary" show-arrows aria-label="打开的标签页" @update:model-value="(value) => { const tab = editor.tabs.find((t) => tabKey(t) === value); if (tab) editor.activate(tab) }">
+      <v-tab
+        v-for="t in editor.tabs"
         :key="tabKey(t)"
-        class="sk-tab"
-        :class="{ 'sk-tab-on': editor.active === tabKey(t) }"
+        :id="`sk-tab-${tabKey(t)}`"
+        :value="tabKey(t)"
+        @click="editor.activate(t)"
+        @keydown.delete.prevent="close(t)"
         @auxclick.middle="close(t)"
       >
-        <button
-          :id="`sk-tab-${tabKey(t)}`"
-          type="button"
-          role="tab"
-          class="sk-tab-main"
-          :aria-selected="editor.active === tabKey(t)"
-          :tabindex="editor.active === tabKey(t) ? 0 : -1"
-          @click="editor.activate(t)"
-          @keydown="onTabKey($event, i)"
-        >
           <span class="sk-tab-label">{{ label(t) }}</span>
           <span v-if="dirty(t)" class="sk-tab-dirty" aria-label="有未保存的改动">●</span>
-        </button>
-        <button type="button" class="sk-tab-close" :aria-label="`关闭 ${label(t)}`" title="关闭（Delete）" @click="close(t)">
-          <v-icon :icon="mdiClose" size="14" />
-        </button>
-      </div>
-    </div>
+        <template #append>
+        <v-icon :icon="mdiClose" size="18" role="button" tabindex="0" :aria-label="`关闭 ${label(t)}`" title="关闭（Delete）" @click.stop="close(t)" @keydown.enter.stop.prevent="close(t)" @keydown.space.stop.prevent="close(t)">
+        </v-icon>
+        </template>
+      </v-tab>
+    </v-tabs>
 
     <div class="sk-tab-body">
       <div v-if="!hasTabs" class="sk-welcome">

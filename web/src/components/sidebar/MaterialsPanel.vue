@@ -9,6 +9,7 @@ import { useNotifyStore } from '../../stores/notify'
 import { useWorkspaceStore } from '../../stores/workspace'
 import PanelHeader from '../PanelHeader.vue'
 import StateBlock from '../StateBlock.vue'
+import ExpandableTextarea from '../ExpandableTextarea.vue'
 
 // 素材 = 喂给 Scaffolder 的参考（范文、资料）。归属：全局 / 文集 / 文章。
 
@@ -177,15 +178,13 @@ async function remove(m: Material) {
     <ul v-else class="sk-mat-list">
       <li v-for="m in items" :key="m.id" class="sk-mat">
         <div class="sk-mat-row">
-          <button
-            type="button"
-            class="sk-mat-name"
+          <v-list-item
+            class="flex-grow-1"
+            :title="m.name"
+            :subtitle="`${ownerLabel(m)} · ${m.content.length} 字`"
             :aria-expanded="expanded === m.id"
             @click="expanded = expanded === m.id ? null : m.id"
-          >
-            <span class="sk-mat-title">{{ m.name }}</span>
-            <span class="sk-muted text-caption">{{ ownerLabel(m) }} · {{ m.content.length }} 字</span>
-          </button>
+          />
           <v-btn :icon="mdiDeleteOutline" size="x-small" density="comfortable" :aria-label="`删除素材 ${m.name}`" @click="remove(m)" />
         </div>
         <pre v-if="expanded === m.id" class="sk-mat-preview">{{ m.content.length > 1200 ? m.content.slice(0, 1200) + '…' : m.content }}</pre>
@@ -196,7 +195,7 @@ async function remove(m: Material) {
       <v-card title="粘贴新建素材">
         <v-card-text class="d-flex flex-column ga-3">
           <v-text-field v-model="pasteName" label="名称" autofocus />
-          <v-textarea v-model="pasteContent" label="内容" rows="8" />
+          <ExpandableTextarea v-model="pasteContent" label="内容" rows="8" />
           <v-select v-model="pasteOwner" :items="owners" label="归属" />
         </v-card-text>
         <v-card-actions>
