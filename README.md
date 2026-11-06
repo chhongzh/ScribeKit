@@ -27,6 +27,14 @@ cd web && bun install && bun run build && cd .. && go build ./cmd/scribekit
 
 运行 `scribekit [-addr 127.0.0.1:7788] [-data <目录>] [-no-browser] [-jsonlog]`，数据默认存在系统配置目录下的 `ScribeKit/scribekit.db`。
 
+## 发布
+
+GitHub Actions 在 PR、推送到 `main` / `master` 和推送 `v*` 标签时运行前后端测试，并通过 GoReleaser 构建包含前端的单文件程序。Windows、Linux、macOS 均提供 amd64 和 arm64 版本，Windows 使用 ZIP，其他平台使用 tar.gz，并生成 `checksums.txt`。
+
+推送版本标签（例如 `v0.1.0`）后，测试和快照构建通过才会发布 GitHub Release；带预发布版本号的标签（例如 `v0.1.0-rc.1`）会标记为预发布。发布使用仓库自带的 `GITHUB_TOKEN`。
+
+本地安装 Go 1.27.3、Node.js 24、Bun 1.3.14 和 GoReleaser v2.20.0 后，在仓库根目录执行 `goreleaser release --snapshot --clean` 可验证完整打包流程，产物位于 `dist/`。
+
 ## 配置模型
 
 在设置页填写 provider（`claude` 或兼容 OpenAI 协议的 `openai` + baseUrl）、API key、Analyzer 与 Scaffolder 的模型名，点“测试连通性”。没有配置时，所有 AI 请求会提示先去设置。

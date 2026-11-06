@@ -1,0 +1,45 @@
+version: 2
+
+project_name: scribekit
+
+before:
+  hooks:
+    - bun install --cwd web --frozen-lockfile
+    - bun run --cwd web build
+
+builds:
+  - id: scribekit
+    main: ./cmd/scribekit
+    binary: scribekit
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+
+archives:
+  - formats: [tar.gz]
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  prerelease: auto
+
+changelog:
+  sort: asc
