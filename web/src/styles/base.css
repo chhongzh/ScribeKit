@@ -1,0 +1,363 @@
+/*
+  颜色只通过 Vuetify 主题变量引用：rgb(var(--v-theme-x)) 或 rgba(var(--v-theme-x), α)。
+  本文件不写任何颜色字面值。
+*/
+
+:root {
+  /* 界面 chrome 用系统无衬线：工具界面要的是小字号下的清晰，不是性格。 */
+  --sk-font-ui: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  /* 正文用宋体系：中文作文阅读与誊写的惯例字体，长时间写作不累眼。 */
+  --sk-font-body: 'Noto Serif SC', 'Source Han Serif SC', 'Source Han Serif', 'Songti SC', 'STSong', 'SimSun', serif;
+  /* 只用于 [ ... ] 指令与日志：让指令一眼看出“这是给机器读的”。 */
+  --sk-font-code: ui-monospace, 'Cascadia Mono', 'SFMono-Regular', Consolas, monospace;
+  --sk-line: rgba(var(--v-border-color), var(--v-border-opacity));
+  --sk-muted: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity));
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--sk-font-ui);
+}
+
+.v-application {
+  font-family: var(--sk-font-ui);
+}
+
+:focus-visible {
+  outline: 2px solid rgb(var(--v-theme-primary));
+  outline-offset: 1px;
+}
+
+button.sk-plain {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.sk-muted {
+  color: var(--sk-muted);
+}
+
+.sk-kbd {
+  font-family: var(--sk-font-code);
+  font-size: 0.85em;
+  padding: 0 0.35em;
+  border: 1px solid var(--sk-line);
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+/* ---------- 稿面 ---------- */
+
+/* ProseMirror 必需的基础规则（不引入它自带的 CSS，那里写了颜色字面值）。 */
+.ProseMirror {
+  position: relative;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  white-space: break-spaces;
+  font-variant-ligatures: none;
+  font-feature-settings: 'liga' 0;
+}
+.ProseMirror-hideselection *::selection {
+  background-color: rgba(var(--v-theme-on-surface), 0);
+}
+.ProseMirror-hideselection {
+  caret-color: rgba(var(--v-theme-on-surface), 0);
+}
+.ProseMirror [draggable][contenteditable='false'] {
+  user-select: text;
+}
+
+.sk-doc {
+  font-family: var(--sk-font-body);
+  font-size: 18px;
+  line-height: 2;
+  color: rgb(var(--v-theme-on-surface));
+  word-break: break-word;
+  padding-bottom: 40vh;
+  caret-color: rgb(var(--v-theme-primary));
+  border-radius: 2px;
+}
+
+/* 正文获得焦点时：外框很淡，主要靠光标所在半句的底线说明“你在这里”。 */
+.sk-doc:focus-visible {
+  outline: 1px solid rgba(var(--v-theme-primary), 0.4);
+  outline-offset: 10px;
+}
+
+.sk-doc ::selection {
+  background-color: rgba(var(--v-theme-primary), 0.22);
+}
+
+.sk-para {
+  position: relative;
+  margin: 0 0 0.35em;
+  border-radius: 2px;
+}
+
+.sk-text {
+  margin: 0;
+  /* 首行缩进两字：中文作文的版式惯例。 */
+  text-indent: 2em;
+  min-height: 2em;
+}
+
+.sk-genre-poetry .sk-text {
+  text-indent: 0;
+}
+
+.sk-gutter {
+  position: absolute;
+  left: -7.25em;
+  top: 0;
+  width: 6.5em;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 0.25em;
+  font-size: 13px;
+  line-height: 36px;
+  user-select: none;
+  text-indent: 0;
+}
+
+.sk-kind {
+  font-family: var(--sk-font-body);
+  font-size: 13px;
+  color: var(--sk-muted);
+  background: none;
+  border: 0;
+  padding: 0 2px;
+  cursor: pointer;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+
+.sk-kind:hover {
+  color: rgb(var(--v-theme-on-surface));
+  background-color: rgba(var(--v-theme-on-surface), var(--v-hover-opacity));
+}
+
+.sk-para[data-kind='opening'] .sk-kind,
+.sk-para[data-kind='closing'] .sk-kind,
+.sk-para[data-kind='lyric'] .sk-kind,
+.sk-para[data-kind='transition'] .sk-kind,
+.sk-para[data-kind='callback'] .sk-kind {
+  color: rgb(var(--v-theme-on-surface));
+}
+
+.sk-drag {
+  cursor: grab;
+  color: var(--sk-muted);
+  opacity: 0;
+  letter-spacing: -0.3em;
+  padding-right: 0.3em;
+}
+
+.sk-para:hover .sk-drag {
+  opacity: 1;
+}
+
+.sk-argmarks {
+  position: absolute;
+  top: 36px;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.4;
+}
+
+.sk-arg {
+  font-size: 12px;
+  padding: 0 4px;
+  border: 1px solid var(--sk-line);
+  border-radius: 2px;
+  margin-top: 2px;
+  color: rgb(var(--v-theme-on-surface));
+}
+
+.sk-arg-claim {
+  border-color: rgb(var(--v-theme-primary));
+}
+
+.sk-drop-before {
+  box-shadow: inset 0 2px 0 rgb(var(--v-theme-primary));
+}
+
+.sk-drop-after {
+  box-shadow: inset 0 -2px 0 rgb(var(--v-theme-primary));
+}
+
+.sk-ph > .sk-text::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  pointer-events: none;
+  color: var(--sk-muted);
+  text-indent: 0;
+}
+
+/* 半句：最小编辑粒度。光标所在与悬停所在用安静的底线提示边界。 */
+.sk-half-hover {
+  box-shadow: inset 0 -1px 0 rgba(var(--v-theme-on-surface), 0.35);
+}
+
+.sk-half-cur {
+  box-shadow: inset 0 -2px 0 rgba(var(--v-theme-primary), 0.5);
+}
+
+/* [ ... ] 指令：给 Scaffolder 读的，不是正文。 */
+.sk-cmd {
+  font-family: var(--sk-font-code);
+  font-size: 0.82em;
+  background-color: rgba(var(--v-theme-secondary), 0.14);
+  border: 1px solid rgba(var(--v-theme-secondary), 0.6);
+  border-radius: 3px;
+  padding: 0.1em 0.2em;
+}
+
+/* 描写类型底色（SPEC §7） */
+.sk-desc-appearance {
+  background-color: rgba(var(--v-theme-desc-appearance), var(--v-sk-alpha-appearance));
+}
+.sk-desc-speech {
+  background-color: rgba(var(--v-theme-desc-speech), var(--v-sk-alpha-speech));
+}
+.sk-desc-action {
+  background-color: rgba(var(--v-theme-desc-action), var(--v-sk-alpha-action));
+}
+.sk-desc-psychology {
+  background-color: rgba(var(--v-theme-desc-psychology), var(--v-sk-alpha-psychology));
+}
+.sk-desc-expression {
+  background-color: rgba(var(--v-theme-desc-expression), var(--v-sk-alpha-expression));
+}
+.sk-desc-environment {
+  background-color: rgba(var(--v-theme-desc-environment), var(--v-sk-alpha-environment));
+}
+
+/* 标记（SPEC §6 前端渲染约定） */
+.sk-mk-theme {
+  outline: 1.5px solid rgb(var(--v-theme-primary));
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+.sk-mk-keyword {
+  text-decoration: underline solid rgb(var(--v-theme-primary)) 1.5px;
+  text-underline-offset: 5px;
+}
+.sk-mk-repeat {
+  text-decoration: underline wavy rgb(var(--v-theme-warning)) 1px;
+  text-underline-offset: 5px;
+}
+.sk-mk-pronoun {
+  text-decoration: underline dashed rgba(var(--v-theme-on-surface), 0.7) 1px;
+  text-underline-offset: 5px;
+  cursor: help;
+}
+.sk-mk-callback {
+  text-decoration: underline double rgb(var(--v-theme-secondary)) 1px;
+  text-underline-offset: 4px;
+}
+.sk-ref-source {
+  background-color: rgba(var(--v-theme-primary), 0.18);
+}
+.sk-ref-target {
+  background-color: rgba(var(--v-theme-primary), 0.28);
+  outline: 1px dashed rgb(var(--v-theme-primary));
+}
+
+/* 诊断：LSP 式点状下划线。用渐变画点，避免和其他下划线互相覆盖。 */
+.sk-diag {
+  background-image: radial-gradient(circle, var(--sk-diag-color) 1px, rgba(var(--v-theme-on-surface), 0) 1.3px);
+  background-size: 4px 3px;
+  background-repeat: repeat-x;
+  background-position: 0 100%;
+}
+.sk-diag-hint {
+  --sk-diag-color: rgba(var(--v-theme-on-surface), 0.55);
+}
+.sk-diag-info {
+  --sk-diag-color: rgb(var(--v-theme-info));
+}
+.sk-diag-warning {
+  --sk-diag-color: rgb(var(--v-theme-warning));
+}
+
+/* Scaffolder 建议：明显不是正文，也不属于正文。 */
+.sk-sg-widget {
+  font-family: var(--sk-font-ui);
+  font-size: 14px;
+  line-height: 1.7;
+  text-indent: 0;
+  border: 1px dashed rgba(var(--v-theme-primary), 0.7);
+  border-radius: 3px;
+  background-color: rgba(var(--v-theme-primary), 0.06);
+  padding: 0.1em 0.4em;
+  margin: 0 0.15em;
+  user-select: none;
+  white-space: pre-wrap;
+}
+.sk-sg-block {
+  display: block;
+  margin: 0.4em 0 0.2em;
+  padding: 0.4em 0.7em;
+}
+.sk-sg-head {
+  font-size: 12px;
+  color: var(--sk-muted);
+  margin-right: 0.5em;
+}
+.sk-sg-block .sk-sg-head {
+  display: block;
+}
+.sk-sg-text {
+  color: rgb(var(--v-theme-on-surface));
+}
+.sk-sg-streaming .sk-sg-text::after {
+  content: '▍';
+  color: rgb(var(--v-theme-primary));
+}
+.sk-sg-actions button {
+  font: inherit;
+  font-size: 12px;
+  margin-left: 0.5em;
+  border: 1px solid var(--sk-line);
+  border-radius: 3px;
+  background-color: rgb(var(--v-theme-surface));
+  color: rgb(var(--v-theme-on-surface));
+  padding: 0 0.5em;
+  cursor: pointer;
+}
+.sk-sg-target {
+  outline: 1px dashed rgba(var(--v-theme-primary), 0.7);
+  outline-offset: 1px;
+}
+.sk-sg-target-focus {
+  background-color: rgba(var(--v-theme-primary), 0.12);
+}
+
+/* 评审视图复用描写底色 */
+.sk-review-half {
+  font-family: var(--sk-font-body);
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+/*
+  暗色下默认主题的 error 色作文字时对比度不足 4.5:1，向 on-surface 混合 20% 提亮。
+  只由主题变量派生，导入的主题同样适用。
+*/
+.v-theme--dark .text-error,
+.v-theme--dark .sk-error-text {
+  color: color-mix(in srgb, rgb(var(--v-theme-error)) 80%, rgb(var(--v-theme-on-surface))) !important;
+}
+.sk-error-text {
+  color: rgb(var(--v-theme-error));
+}
