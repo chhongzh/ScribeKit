@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { mdiChevronDown, mdiDeleteSweepOutline } from '@mdi/js'
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { Diagnostic } from '../../api/types'
 import { sliceCp } from '../../core/offsets'
 import { halfAt, segment } from '../../core/textseg'
@@ -68,13 +68,13 @@ function go(p: Problem) {
 }
 
 watch(
-  () => log.entries.length,
-  async () => {
-    if (ui.panelTab !== 'output') return
-    await nextTick()
+  () => [log.entries.at(-1)?.seq, ui.panelTab, ui.layout.panelOpen, ui.layout.panelHeight, outEl.value],
+  () => {
+    if (ui.panelTab !== 'output' || !ui.layout.panelOpen) return
     const el = outEl.value
-    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 80) el.scrollTop = el.scrollHeight
+    if (el) el.scrollTop = el.scrollHeight
   },
+  { flush: 'post', immediate: true },
 )
 </script>
 
